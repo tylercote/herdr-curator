@@ -1,0 +1,96 @@
+id = "curator"
+name = "Curator"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+platforms = ["macos", "linux"]
+description = "Hermes-parity skill curator: usage telemetry, stale/archive lifecycle, snapshots + audit ledger with rollback, and an opt-in LLM consolidation pass over your SKILL.md library."
+
+# Every command goes through $HERDR_PLUGIN_ROOT/bin/curator because panes may open with the
+# user's repo (not the plugin) as cwd. Stdlib Python 3.9+ only — nothing to build or install.
+
+[[build]]
+command = ["sh", "-c", "python3 -c 'import sys; assert sys.version_info >= (3, 9), sys.version'"]
+
+# Session start == Hermes CLI start: show the first-run / rename-map notices, run one fully-idle
+# tick, then spawn the detached 60 s scheduler daemon (== the Hermes gateway curator tick).
+[[startup]]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" startup"]
+
+[[panes]]
+id = "status"
+title = "Curator: status"
+placement = "overlay"
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane status"]
+
+[[panes]]
+id = "run"
+title = "Curator: run"
+placement = "split"
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane run"]
+
+[[panes]]
+id = "report"
+title = "Curator: report"
+placement = "overlay"
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane report"]
+
+[[panes]]
+id = "console"
+title = "Curator"
+placement = "overlay"
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane console"]
+
+[[actions]]
+id = "status"
+title = "Curator: status"
+description = "Scheduler state, managed/unmanaged counts, pins, least/most active skills."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action status"]
+
+[[actions]]
+id = "run"
+title = "Curator: run (prune-only)"
+description = "Snapshot, then apply the deterministic stale/archive transitions now."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action run"]
+
+[[actions]]
+id = "dry-run"
+title = "Curator: dry run"
+description = "Preview what a run would do; writes REPORT.md, mutates nothing."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action dry-run"]
+
+[[actions]]
+id = "consolidate"
+title = "Curator: run with LLM consolidation"
+description = "Prune, then fork a headless agent (skills toolset only) to build umbrella skills."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action consolidate"]
+
+[[actions]]
+id = "report"
+title = "Curator: last report"
+description = "Show the most recent run's REPORT.md."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action report"]
+
+[[actions]]
+id = "console"
+title = "Curator: console"
+description = "Interactive menu over every curator verb (pin, adopt, restore, rollback, ledger, ...)."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action console"]
+
+[[actions]]
+id = "report-link"
+title = "Curator: open this report"
+contexts = ["pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action report-link"]
+
+# Ctrl-click a curator REPORT.md path printed in any pane.
+[[link_handlers]]
+id = "report-link"
+title = "Curator: open this report"
+pattern = "^file://.*/logs/curator/[^/]+/REPORT\\.md$"
+action = "report-link"

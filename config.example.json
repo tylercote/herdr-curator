@@ -1,0 +1,29 @@
+{
+  "skills": {
+    "dir": "",
+    "external_dirs": [],
+    "create_dir": "",
+    "disabled": [],
+    "ledger": true
+  },
+  "curator": {
+    "enabled": true,
+    "interval_hours": 168,
+    "min_idle_hours": 2,
+    "stale_after_days": 30,
+    "archive_after_days": 90,
+    "consolidate": false,
+    "prune_builtins": true,
+    "archive_ttl_days": 0,
+    "backup": { "enabled": true, "keep": 5 }
+  },
+  "auxiliary": {
+    "curator": {
+      "provider": "auto",
+      "model": "",
+      "timeout": 600,
+      "command": ["my-agent", "--model", "{model}", "--mcp-config", "{mcp_config}", "{prompt}"]
+    }
+  },
+  "model": { "provider": "auto", "default": "" }
+}
