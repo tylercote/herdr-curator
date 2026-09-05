@@ -33,6 +33,7 @@ error strings preserved) unless listed under *Deviations*. Message hints read
 | `cli.py` `_tui_startup_background_maintenance` (session start, idle=∞) | `herdr.startup` → `tick(idle=∞)` | |
 | `gateway/run.py` `_housekeeping_curator` (60 s tick, idle=∞) | `herdr.daemon` | idle measured from `herdr agent list` instead of assumed ∞ |
 | `/curator` slash command, dashboard `/api/curator/*` | Herdr actions/panes (`herdr.ACTIONS`, `herdr.PANES`) | different host, same operations |
+| `hermes skills` (`hermes_cli/skills_config.py` + `curses_ui.curses_checklist`) | `skills_tui` (`curator skills`, pane `skills`) | selected == enabled, `skills.disabled` / `platform_disabled`, essential never disabled, category toggle; plus (plugin-added) curator flags, pin/adopt/archive/restore, pager, ledgered `$EDITOR` edits |
 
 ## Deviations (deliberate)
 
@@ -43,7 +44,9 @@ error strings preserved) unless listed under *Deviations*. Message hints read
 5. **Not ported (Hermes-runtime features with no Herdr counterpart):** the security scanner (`skills.guard_agent_created`, default off), the staged write-approval gate (`skills.write_approval`), skill lint findings, skills-sync push/org proposals, plugin-provided skills, SKILL.md template variables / inline shell, readiness (config-var) checks, project-skill quarantine, the per-session repeat-view dedup stub, other-profile lookups in not-found errors, the `on_skill_lifecycle` plugin bus (kept as an in-process registry), `PLUGIN-COMPAT` re-export blocks.
 6. **Idle measurement.** Hermes passes `idle_for_seconds=inf` from both trigger points (gating is effectively interval-only). The daemon here measures real idleness from Herdr agent states, so `min_idle_hours` is honoured; the startup tick still passes `inf` like the CLI.
 7. **Program name in hints:** `curator …` instead of `hermes curator …`.
-8. **Reports/notices surfaces:** the once-per-run rename map is shown at Herdr session start (Hermes: on `hermes update`); run summaries become Herdr notifications (Hermes: `💾` console line / gateway log).
+8. **Symlinked skill dirs.** Every `SKILL.md` scan goes through `skill_utils.rglob_following_symlinks`, so a symlinked skill (`~/.claude/skills/x -> ../../.agents/skills/x`) is seen by all scanners on every Python version. Upstream mixes `Path.rglob` (stops at symlinks under `**` since Python 3.13) with `os.walk(followlinks=True)`, which can make `adopt` succeed while the curated report omits the skill.
+9. **Skills TUI additions:** `hermes skills` only toggles enabled/disabled; `curator skills` adds the curator flags and verbs, a pager and ledgered editing (see the table).
+10. **Reports/notices surfaces:** the once-per-run rename map is shown at Herdr session start (Hermes: on `hermes update`); run summaries become Herdr notifications (Hermes: `💾` console line / gateway log).
 
 ## Behaviours verified identical (selected)
 

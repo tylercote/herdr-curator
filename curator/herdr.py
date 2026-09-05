@@ -246,6 +246,7 @@ def _act_report_link() -> int:
 
 
 ACTIONS: Dict[str, Callable[[], int]] = {
+    "skills": _act_open("skills", "overlay"),
     "status": _act_open("status", "overlay"),
     "run": _act_open("run", "split"),
     "dry-run": _act_open("run", "split", CURATOR_RUN_ARGS="--dry-run"),
@@ -304,6 +305,7 @@ def _pane_report() -> int:
 
 
 _CONSOLE_MENU = [
+    ("s", "skills TUI (enable/disable, browse, edit)", ["skills"]),
     ("1", "status", ["status"]), ("2", "usage", ["usage"]), ("3", "run (prune-only)", ["run"]),
     ("4", "run --dry-run", ["run", "--dry-run"]), ("5", "run --consolidate", ["run", "--consolidate"]),
     ("6", "list-unmanaged", ["list-unmanaged"]), ("7", "list-archived", ["list-archived"]),
@@ -325,12 +327,22 @@ def _pane_console() -> int:
             return 0
         argv = next((a for k, _l, a in _CONSOLE_MENU if k == answer), None) or shlex.split(answer)
         try:
+            if argv[:1] == ["skills"]:
+                from curator.skills_tui import cli_main as skills_main
+                skills_main(argv[1:])
+                continue
             cli.cli_main(argv)
         except SystemExit as e:
             print(f"curator: exited {e.code}")
 
 
-PANES: Dict[str, Callable[[], int]] = {"status": _pane_status, "run": _pane_run, "report": _pane_report, "console": _pane_console}
+def _pane_skills() -> int:
+    from curator.skills_tui import cli_main
+    return cli_main([])
+
+
+PANES: Dict[str, Callable[[], int]] = {"skills": _pane_skills, "status": _pane_status, "run": _pane_run,
+                                       "report": _pane_report, "console": _pane_console}
 
 
 def pane(entrypoint: str) -> int:

@@ -26,6 +26,12 @@ Bind the actions in `~/.config/herdr/config.toml` (all optional — everything i
 
 ```toml
 [[keys.command]]
+key = "prefix+s"
+type = "plugin_action"
+command = "curator.skills"
+description = "skills: enable/disable, browse, edit"
+
+[[keys.command]]
 key = "prefix+c"
 type = "plugin_action"
 command = "curator.console"
@@ -89,6 +95,10 @@ curator purge [--days N] [--dry-run]
 ```
 
 (`curator` = `python3 "$(herdr plugin config-dir curator | sed 's#/config/[^/]*$##')/…"` — simplest is to alias `bin/curator` from your checkout, or run `herdr plugin action invoke curator.console`.)
+
+## Skills TUI
+
+`curator skills` (Herdr: `curator.skills`, `prefix+s` above) is the `hermes skills` checklist — `[✓]` = enabled, persisted to `skills.disabled` (or `skills.platform_disabled.<platform>` with `--platform`), essential skills never disableable, `c` toggles a whole category — extended with the curator's view of each skill: managed/pinned flags, lifecycle state, use/view/patch counts. Keys: `space` toggle · `Enter` view · `e` edit in `$EDITOR` (the change is ledgered as `actor=user` and counted as a patch, so it is rollback-able) · `p` pin · `a` adopt · `x` archive · `r` restore · `/` filter · `?` help. Scriptable: `curator skills --list [--json]`, `curator skills enable|disable <names>`.
 
 ## Telemetry from your agents
 

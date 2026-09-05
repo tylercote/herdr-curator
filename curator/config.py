@@ -169,6 +169,23 @@ def cfg_get(cfg: Optional[Dict[str, Any]], *keys: str, default: Any = None) -> A
     return node
 
 
+def read_user_config() -> Dict[str, Any]:
+    """The raw ``config.json`` layer only (no defaults), ``{}`` when missing."""
+    path = config_path()
+    return _read_json(path) if path.exists() else {}
+
+
+def update_user_config(mutator) -> Dict[str, Any]:
+    """Load ``config.json``, apply ``mutator(cfg)`` in place, write it back atomically.
+    Only the user layer is written — defaults are never frozen into the file."""
+    from curator.fsutil import atomic_json_write
+    cfg = read_user_config()
+    mutator(cfg)
+    atomic_json_write(config_path(), cfg, indent=2, sort_keys=True)
+    clear_cache()
+    return cfg
+
+
 def read_config_section(*path: str) -> Dict[str, Any]:
     """Nested section as a dict; ``{}`` when missing or not a dict."""
     node: Any = load_config_readonly()

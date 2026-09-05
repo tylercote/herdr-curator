@@ -17,6 +17,12 @@ command = ["sh", "-c", "python3 -c 'import sys; assert sys.version_info >= (3, 9
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" startup"]
 
 [[panes]]
+id = "skills"
+title = "Curator: skills"
+placement = "overlay"
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane skills"]
+
+[[panes]]
 id = "status"
 title = "Curator: status"
 placement = "overlay"
@@ -39,6 +45,13 @@ id = "console"
 title = "Curator"
 placement = "overlay"
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane console"]
+
+[[actions]]
+id = "skills"
+title = "Curator: skills"
+description = "Enable/disable, browse and edit skills (the `hermes skills` checklist, plus pin/adopt/archive/restore/edit)."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action skills"]
 
 [[actions]]
 id = "status"

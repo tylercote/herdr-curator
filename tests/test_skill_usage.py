@@ -658,3 +658,16 @@ def test_read_skill_name_falls_back_and_handles_quotes(tmp_path):
     p.write_text("no frontmatter", encoding="utf-8")
     assert _read_skill_name(p, fallback="fb") == "fb"
     assert _read_skill_name(tmp_path / "missing.md", fallback="fb") == "fb"
+
+
+def test_symlinked_skill_dir_is_scanned_by_every_scanner(home, tmp_path):
+    """~/.claude/skills/x -> ../../.agents/skills/x is common; Python 3.13+ rglob stops at symlinks
+    under ** while os.walk(followlinks=True) does not — both scanners must agree."""
+    from curator import skill_usage as u
+    real = write_skill(tmp_path / "agents-skills", "linked")
+    (home / "skills" / "linked").symlink_to(real, target_is_directory=True)
+    assert u._find_skill_dir("linked") is not None
+    assert u.adopt_skill("linked")[0] is True
+    assert "linked" in u.list_agent_created_skill_names()
+    assert [r["name"] for r in u.curated_report()] == ["linked"]
+    assert [r["name"] for r in u.usage_report()] == ["linked"]

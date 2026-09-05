@@ -146,8 +146,8 @@ def _resolve_skill_dir(name: str, category: Optional[str] = None) -> Path:
 
 
 def _iter_skill_dirs(root: Path):
-    from curator.skill_utils import is_excluded_skill_path
-    for skill_md in root.rglob("SKILL.md"):
+    from curator.skill_utils import is_excluded_skill_path, rglob_following_symlinks
+    for skill_md in rglob_following_symlinks(root, "SKILL.md"):
         if not is_excluded_skill_path(skill_md):
             yield skill_md.parent
 

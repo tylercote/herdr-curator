@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from curator import paths
 from curator.config import read_config_section
 from curator.sizefmt import format_bytes
-from curator.skill_utils import is_excluded_skill_path
+from curator.skill_utils import is_excluded_skill_path, rglob_following_symlinks
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def get_keep() -> int:
 
 def _count_skill_files(base: Path) -> int:
     try:
-        return sum(1 for p in base.rglob("SKILL.md") if not is_excluded_skill_path(p))
+        return sum(1 for p in rglob_following_symlinks(base, "SKILL.md") if not is_excluded_skill_path(p))
     except OSError:
         return 0
 

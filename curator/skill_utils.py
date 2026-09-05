@@ -66,6 +66,21 @@ def is_org_mirror_path(path, skills_dir: Path) -> bool:
     return bool(_org_rel_parts(path, skills_dir))
 
 
+def rglob_following_symlinks(base: Path, pattern: str):
+    """``base.rglob(pattern)`` that follows symlinked directories on every Python version.
+
+    ``Path.rglob``'s ``**`` never descends into symlinked directories before 3.13 and only does so
+    with ``recurse_symlinks=True`` from 3.13, so it disagreed with ``iter_skill_index_files``
+    (``os.walk(followlinks=True)``) for a symlinked skill dir — e.g.
+    ``~/.claude/skills/x -> ../../.agents/skills/x``. Built on ``os.walk`` for one behaviour everywhere;
+    *pattern* is a filename glob matched against basenames (sorted, deterministic)."""
+    import fnmatch
+    for root, _dirs, files in os.walk(str(base), followlinks=True):
+        for name in sorted(files):
+            if fnmatch.fnmatch(name, pattern):
+                yield Path(root) / name
+
+
 # --- scanner exclusions -------------------------------------------------------
 
 def is_skill_support_path(path, *, root: Optional[Path] = None) -> bool:

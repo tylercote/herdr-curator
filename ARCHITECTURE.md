@@ -181,6 +181,33 @@ Hermes calls `maybe_run_curator(idle_for_seconds=∞)` at CLI start and every
 
 Run summaries reach the user via `herdr notification show`, and the once-per-run rename map via the startup notice (Hermes shows it on `hermes update`).
 
+## 8b. Skills TUI (`skills_tui.py`)
+
+`hermes skills` is a curses checklist where *selected* = enabled, persisted to
+`skills.disabled` / `skills.platform_disabled.<platform>`, with `ESSENTIAL_SKILLS`
+never disableable and categories toggleable as a block. `skills_tui` ports
+that (`get_disabled_skills` / `save_disabled_skills` write only the user
+`config.json` layer via `config.update_user_config`, never freezing defaults)
+and layers the curator's view on the same rows:
+
+```
+SkillsModel   rows() = skill_usage.usage_report() ⊕ skills_tool._find_all_skills(skip_disabled=True)
+              ⊕ .archive/ names  → {name, category, description, provenance, state, pinned, managed,
+              enabled, counts, last_activity_at, path}
+              set_enabled / toggle_enabled / set_category_enabled (Hermes convention: a category is
+              enabled unless ALL its skills are disabled) · adopt / pin / archive / restore (same rules
+              as the CLI, ledger actor=user) · view() · edit()
+Controller    curses-free key handling (list / filter / view / help modes) + render_lines(width, height)
+run_tui       curses loop: paint render_lines, decode keys, suspend curses around $EDITOR
+cli_main      `curator skills` → TUI on a TTY; `--list [--json]`, `enable|disable <names> [--platform]`
+```
+
+`edit()` is the one place a human edits a skill file through the plugin: it
+captures the package first, runs `$VISUAL`/`$EDITOR`/`vi` on `SKILL.md`, and
+if the bytes changed records a ledger `edit` entry with `actor=user` and bumps
+`patch_count` — so a hand edit is rollback-able with `curator rollback <id>`
+exactly like an agent patch.
+
 ## 9. Configuration
 
 `config.py` deep-merges `DEFAULT_CONFIG` ← optional `<home>/config.yaml` (PyYAML only) ← `config.json` (`CURATOR_CONFIG` > `$HERDR_PLUGIN_CONFIG_DIR/config.json` > `<home>/config.json`), cached on `(mtime_ns, size)`. Keys and defaults are Hermes's:
