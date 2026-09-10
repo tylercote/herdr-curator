@@ -3,8 +3,8 @@
     curator <verb> ...             the curator CLI (status, run, pin, ...)
     curator skills [...]           the skills TUI: enable/disable, browse, edit
     curator mcp-serve ...          skills toolset over MCP for the consolidation fork
-    curator startup                Herdr [[startup]] hook: notices, one tick, spawn daemon
-    curator daemon [--interval S]  the 60 s scheduler tick loop (single instance)
+    curator startup                Herdr [[startup]] hook: notices, hook reconcile, spawn daemon
+    curator daemon [--interval S] [--first-idle S]  the 60 s scheduler tick loop (single instance); runs every pass in-process
     curator tick [--idle S|inf]    one scheduler observation
     curator action <id>            Herdr [[actions]] dispatch
     curator pane <id>              Herdr [[panes]] entrypoints
@@ -60,7 +60,10 @@ def _plugin_verb(verb: str, rest: List[str]) -> int:
     if verb == "daemon":
         p = argparse.ArgumentParser(prog="curator daemon")
         p.add_argument("--interval", type=float, default=60.0)
-        return herdr.daemon(interval=p.parse_args(rest).interval)
+        p.add_argument("--first-idle", type=float, default=float("inf"),
+                       help="idle seconds assumed for the first tick ('inf' = fully idle); later ticks measure via Herdr")
+        a = p.parse_args(rest)
+        return herdr.daemon(interval=a.interval, first_idle=a.first_idle)
     if verb == "tick":
         p = argparse.ArgumentParser(prog="curator tick")
         p.add_argument("--idle", default=None, help="idle seconds, 'inf', or omit to measure via Herdr")

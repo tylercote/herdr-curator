@@ -947,12 +947,13 @@ def _run_llm_review(prompt: str) -> Dict[str, Any]:
 # --- Public entrypoint for the session-start hook ---
 
 def maybe_run_curator(*, idle_for_seconds: Optional[float] = None,
-                      on_summary: Optional[Callable[[str], None]] = None) -> Optional[Dict[str, Any]]:
+                      on_summary: Optional[Callable[[str], None]] = None,
+                      synchronous: bool = False) -> Optional[Dict[str, Any]]:
     """Best-effort: run a curator pass if all gates pass. Never raises."""
     try:
         if not should_run_now() or (idle_for_seconds is not None and idle_for_seconds < get_min_idle_hours() * 3600.0):
             return None
-        return run_curator_review(on_summary=on_summary)
+        return run_curator_review(on_summary=on_summary, synchronous=synchronous)
     except Exception as e:
         logger.debug("maybe_run_curator failed: %s", e, exc_info=True)
         return None

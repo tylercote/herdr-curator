@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from conftest import ROOT, write_skill
 
 
@@ -59,12 +61,32 @@ def test_skill_view_bumps_telemetry(home, tmp_path):
 
 
 def test_skill_manage_flat_and_operations_shapes(home, tmp_path):
-    server = _server(tmp_path, background_review=False)
+    from curator import skill_usage
+    server = _server(tmp_path)
     content = "---\nname: n\ndescription: d.\n---\nbody\n"
     _, r = _call(server, "skill_manage", {"action": "create", "name": "n", "content": content})
     assert r["success"] is True
+    assert skill_usage.get_record("n")["created_by"] == "agent"  # created through the server ⇒ managed
     _, r = _call(server, "skill_manage", {"operations": [{"action": "write_file", "name": "n", "file_path": "references/x.md", "file_content": "x"}]})
     assert r["success"] is True and r["operations_applied"] == 1
+
+
+def test_server_cannot_be_built_without_the_ownership_guard(home, tmp_path):
+    """No flag, parameter or code path serves skill_manage unguarded: a non-managed skill is refused
+    by every Server instance, and the old --foreground bypass is rejected by the CLI."""
+    import inspect
+    from curator import mcp_server
+    from curator.skill_provenance import is_background_review
+    assert "background_review" not in inspect.signature(mcp_server.Server.__init__).parameters
+    write_skill(home / "skills", "yours", body="Step 1: Do the thing.")
+    for kw in ({}, {"dry_run": True}):
+        server = _server(tmp_path, **kw)
+        assert is_background_review()
+        _, r = _call(server, "skill_manage", {"action": "patch", "name": "yours", "old_string": "Do the thing.", "new_string": "x"})
+        assert r["success"] is False
+    assert (home / "skills" / "yours" / "SKILL.md").read_text().count("Do the thing.") == 1
+    with pytest.raises(SystemExit):
+        mcp_server.main(["--foreground"])
 
 
 def test_background_review_guards_are_live_in_server(home, tmp_path):

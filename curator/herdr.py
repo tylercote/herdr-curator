@@ -155,14 +155,18 @@ def _on_summary(message: str) -> None:
     notify(NOTIFY_TITLE, body=message)
 
 
-def tick(*, idle_for_seconds: Optional[float] = "measure") -> Optional[Dict[str, Any]]:  # type: ignore[assignment]
-    """One scheduler observation: ``maybe_run_curator`` with the measured idle time."""
+def tick(*, idle_for_seconds: Optional[float] = "measure", synchronous: bool = False) -> Optional[Dict[str, Any]]:  # type: ignore[assignment]
+    """One scheduler observation: ``maybe_run_curator`` with the measured idle time. The daemon
+    passes ``synchronous=True`` so a pass can never outlive the process that started it."""
     from curator.curator import maybe_run_curator
     idle = globals()["idle_for_seconds"]() if idle_for_seconds == "measure" else idle_for_seconds
-    return maybe_run_curator(idle_for_seconds=idle, on_summary=_on_summary)
+    return maybe_run_curator(idle_for_seconds=idle, on_summary=_on_summary, synchronous=synchronous)
 
 
 def startup(*, spawn_daemon: bool = True) -> int:
+    """The Herdr ``[[startup]]`` hook: notices, hook reconcile, spawn the daemon. It never ticks
+    itself — this process exits immediately, which would kill an in-flight LLM pass — so the
+    daemon owns every pass and its first tick is the fully-idle session-start observation."""
     from curator import integrations, notices
     first = notices.first_run_notice_text()
     if first:
@@ -176,9 +180,8 @@ def startup(*, spawn_daemon: bool = True) -> int:
         changed = [f"hook setup failed: {e}"]
     if changed:
         notify(NOTIFY_TITLE, body="\n".join(changed))
-    tick(idle_for_seconds=float("inf"))  # session start == fully idle
     if spawn_daemon:
-        _spawn_detached(["daemon"])
+        _spawn_detached(["daemon", "--first-idle", "inf"])  # session start == fully idle
     return 0
 
 
@@ -208,8 +211,11 @@ def _socket_present() -> bool:
     return True if not sock else Path(sock).exists()
 
 
-def daemon(interval: float = 60.0) -> int:
-    """The 60 s curator tick as a detached, single-instance loop."""
+def daemon(interval: float = 60.0, first_idle: float = float("inf")) -> int:
+    """The 60 s curator tick as a detached, single-instance loop. The first tick observes
+    ``first_idle`` (∞ from ``startup``: a session start is fully idle), later ticks measure idle
+    via Herdr. Every pass runs synchronously inside the loop, so a pass cannot be cut short by
+    the process exiting; blocking the loop during a pass is fine as it has nothing else to do."""
     pidfile = paths.plugin_state_dir() / "daemon.pid"
     try:
         pidfile.parent.mkdir(parents=True, exist_ok=True)
@@ -219,12 +225,14 @@ def daemon(interval: float = 60.0) -> int:
     if existing and existing != os.getpid() and _pid_alive(existing):
         return 1
     pidfile.write_text(str(os.getpid()), encoding="utf-8")
+    idle: Any = first_idle
     try:
         while True:
             try:
-                tick()
+                tick(idle_for_seconds=idle, synchronous=True)
             except Exception:
                 pass
+            idle = "measure"
             if not _socket_present():
                 break
             time.sleep(interval)

@@ -422,7 +422,10 @@ class TestBackgroundOwnershipPolicyConsistency:
         assert first["success"] == second["success"] is False
         assert "not curator-managed" in first["error"] and "curator adopt flip-skill" in first["error"]
 
-    def test_foreground_write_to_unmanaged_skill_still_allowed(self, home):
+    def test_in_process_foreground_write_is_origin_scoped(self, home):
+        """The ownership guard keys on the write origin. Nothing served to an agent ever runs with the
+        foreground origin (``mcp_server.Server`` binds background_review unconditionally); this pins
+        the library-level scoping that the CLI/TUI rely on."""
         from curator.skill_manager import _create_skill, skill_manage
         _create_skill("no-record", VALID_SKILL_CONTENT)
         res = json.loads(skill_manage(action="patch", name="no-record", old_string="Do the thing.", new_string="Do the new thing."))

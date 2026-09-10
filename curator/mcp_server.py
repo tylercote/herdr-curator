@@ -1,11 +1,13 @@
 """The ``skills`` toolset served over MCP (stdio, newline-delimited JSON-RPC 2.0).
 
 This is the fork's ENTIRE tool surface: ``skills_list``, ``skill_view``,
-``skill_manage``. The process
-binds the ``background_review`` write origin for its whole life, so the
-ownership / read-before-write / consolidation-delete guards fire and every
-ledger entry is tagged ``actor=curator``; ``skill_view`` bumps the view
-counter only — the pass's own reading is not use.
+``skill_manage``. The process unconditionally binds the ``background_review``
+write origin for its whole life — there is no way to serve without it — so the
+ownership / read-before-write / consolidation-delete guards fire for every
+caller, whether the curator's own consolidation fork or an agent the user
+mounted the server in: non-managed (user, external, pinned) skills can never
+be edited through this server. Every ledger entry is tagged ``actor=curator``;
+``skill_view`` bumps the view counter only — an agent's reading is not use.
 
 Every ``tools/call`` is appended to ``<run-dir>/tool_calls.jsonl`` as
 ``{"name", "arguments"}`` (arguments as the JSON string the agent sent), which
@@ -50,14 +52,11 @@ TOOLS = [_tool_entry(SKILLS_LIST_SCHEMA), _tool_entry(SKILL_VIEW_SCHEMA), _tool_
 
 
 class Server:
-    def __init__(self, *, tool_log: Optional[Path] = None, dry_run: bool = False, background_review: bool = True) -> None:
+    def __init__(self, *, tool_log: Optional[Path] = None, dry_run: bool = False) -> None:
+        from curator.skill_provenance import BACKGROUND_REVIEW, set_current_write_origin
         self.tool_log = Path(tool_log) if tool_log else None
         self.dry_run = dry_run
-        self.background_review = background_review
-        self._origin_token = None
-        if background_review:
-            from curator.skill_provenance import BACKGROUND_REVIEW, set_current_write_origin
-            self._origin_token = set_current_write_origin(BACKGROUND_REVIEW)
+        self._origin_token = set_current_write_origin(BACKGROUND_REVIEW)  # always: the guards are not optional
 
     # --- JSON-RPC -------------------------------------------------------------
 
@@ -173,11 +172,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="curator mcp-serve", description="Serve the skills toolset over MCP (stdio).")
     parser.add_argument("--run-dir", default=None, help="Directory for tool_calls.jsonl (default: no log)")
     parser.add_argument("--dry-run", action="store_true", help="Refuse mutating skill_manage actions")
-    parser.add_argument("--foreground", action="store_true", help="Serve with the foreground write origin (no curator guards)")
     args = parser.parse_args(argv)
     tool_log = Path(args.run_dir) / "tool_calls.jsonl" if args.run_dir else None
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
-    server = Server(tool_log=tool_log, dry_run=args.dry_run, background_review=not args.foreground)
+    server = Server(tool_log=tool_log, dry_run=args.dry_run)
     serve(server)
     return 0
 

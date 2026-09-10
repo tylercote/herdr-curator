@@ -97,7 +97,7 @@ See `config.example.json` for the full key tree.
 
 The curator is **inactivity-triggered, not a cron job**:
 
-1. When a Herdr session starts, the plugin's startup hook shows the first-run notice, performs one fully-idle tick and spawns a detached 60-second ticker.
+1. When a Herdr session starts, the plugin's startup hook shows the first-run notice and spawns a detached 60-second ticker whose first tick treats the session as fully idle. Every pass runs inside that ticker, so it cannot be cut short by the startup hook exiting.
 2. A tick runs a pass only if `interval_hours` (7 d) have passed since the last run **and** no Herdr agent has been `working` for `min_idle_hours` (2 h).
 3. The first observation only seeds the clock — a fresh install never mutates anything until a full interval later. Preview any time with `curator run --dry-run`.
 4. A real pass: snapshot → deterministic stale/archive transitions → (if `curator.consolidate`) the LLM pass → `<state>/logs/curator/<stamp>/REPORT.md` → a Herdr notification with the rename map.
@@ -175,8 +175,9 @@ curator hooks sync             # exactly what session start does
 ```
 
 Anything else can report directly with `curator bump use|view|patch <skill>`, and any agent
-that speaks MCP can mount `curator mcp-serve --foreground` for the full ledgered `skill_manage`
-surface.
+that speaks MCP can mount `curator mcp-serve` for the ledgered, rollback-able `skill_manage`
+surface. The ownership guard is always on: through this server an agent can create skills (they
+become managed) and edit managed ones, and is refused on yours, external and pinned skills.
 
 ## The LLM consolidation pass
 
@@ -184,11 +185,11 @@ Off by default (`curator.consolidate: false`). When on, or with `curator run --c
 
 ## Safety
 
-- **Only managed skills are ever modified autonomously.** A skill is managed only when its `.usage.json` record says `created_by: agent`, and exactly two things write that: the LLM pass creating a *new* skill, and you running `curator adopt`. Hooks, ticks and startup never adopt anything.
+- **Only managed skills are ever modified autonomously.** A skill is managed only when its `.usage.json` record says `created_by: agent`, and exactly two things write that: an agent creating a *new* skill through `curator mcp-serve` (the LLM pass, or an agent you mounted the server in), and you running `curator adopt`. Hooks, ticks and startup never adopt anything.
 - **It sees everything, touches only its own.** `skills_list` shows the model every skill — yours, external ones, its own — each labelled with its `owner`. That visibility exists so it never duplicates you: if a managed skill (or an umbrella it is about to build) is already covered by a user or external skill, the required move is to archive the managed one *absorbed into* the existing skill, which is recorded as a consolidation and modifies nothing outside the curator's own skills.
 - **The LLM pass is fenced at the write layer.** Every `skill_manage` write goes through an ownership guard that refuses pinned, external and non-managed skills regardless of what the model asks; `skills_list` labels every row with its `owner` so the model is told what it may touch; and the pass's own reads count as *views*, not *uses*, so it can never keep a skill artificially alive.
 - **Rollback comes in two sizes.** `curator rollback <ledger-entry-id>` undoes one curator mutation, file by file. `curator rollback --id <snapshot>` restores the **whole tree** — every skill, including ones the curator never managed, back to the moment of that snapshot (a safety snapshot is taken first, so it is itself undoable). Prefer the ledger form; reach for the snapshot form only when you want the entire tree back.
-- `curator mcp-serve --foreground` serves `skill_manage` *without* the curator's ownership guards. It is your own agent's ledgered edit tool, not curation; nothing in the plugin ever runs it.
+- **There is no unguarded server.** `curator mcp-serve` binds the ownership guard unconditionally; it has no flag or parameter to serve `skill_manage` without it. Mount it in your own agent and you get the same ledgered, rollback-able edit surface the curator uses, fenced to managed skills exactly the same way.
 
 ## Development
 

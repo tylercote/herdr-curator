@@ -147,8 +147,9 @@ run_review(prompt)
   └─ llm_meta = {final, summary[:240], model, provider, tool_calls ← run_dir/tool_calls.jsonl, error}
 ```
 
-`mcp_server.Server` is the fork's whole world. On startup it binds
-`skill_provenance.BACKGROUND_REVIEW`, so inside the server process:
+`mcp_server.Server` is the fork's whole world. On startup it unconditionally binds
+`skill_provenance.BACKGROUND_REVIEW` — there is no parameter or flag that serves without it,
+so an agent the user mounts the server in gets exactly the same fence — and inside the server process:
 
 - `skills_list` labels every row `owner: managed|user|external` and the prompt's rule 1 says only `managed` may be touched; `skill_view` under this origin bumps **view only** — the pass's own reading is not use, so a weekly pass cannot keep every managed skill perpetually active.
 - `skill_view` marks the exact file it served (`mark_background_review_skill_read`); a later `skill_manage` write to a file that was **not** viewed in this review is refused (`_read_before_write_required`). Marks live in a ContextVar holding a lock-protected set, so copied contexts within one review share them and separate reviews do not.
@@ -173,8 +174,8 @@ entry, plus `⚠` when the model named an umbrella that does not exist.
 
 Two trigger points:
 
-- `[[startup]]` → `curator startup`: notices as Herdr notifications, one tick with idle = ∞, spawn `curator daemon` detached (`start_new_session`).
-- `curator daemon`: pidfile in `paths.plugin_state_dir()` (stale pids reclaimed), loop `tick(); sleep 60`, exits when `HERDR_SOCKET_PATH` disappears.
+- `[[startup]]` → `curator startup`: notices as Herdr notifications, hook reconcile, spawn `curator daemon --first-idle inf` detached (`start_new_session`). It never ticks itself: the hook process exits immediately and would take an in-flight LLM pass down with it (Python kills daemon threads at exit), leaving `last_run_at` bumped but no REPORT.md. If a daemon is already alive (pidfile), the new one exits and the live daemon's next measured tick covers the session start.
+- `curator daemon`: pidfile in `paths.plugin_state_dir()` (stale pids reclaimed), loop `tick(); sleep 60`, exits when `HERDR_SOCKET_PATH` disappears. The first tick observes `first_idle` (∞ = fully idle), later ticks measure. Every tick calls `maybe_run_curator(synchronous=True)`, so a pass runs inside the loop and can never be cut short by process exit; the loop simply blocks for the pass's duration.
 - `tick`: `idle_for_seconds()` = seconds since any `herdr agent list` entry was `working`/`blocked` (persisted in `activity.json` so the clock survives restarts); `None` when Herdr is unavailable, which `maybe_run_curator` treats as not-measurable → fully idle (CLI semantics).
 - `should_run_now`: enabled, not paused, `last_run_at` present **and** older than `interval_hours`; a missing `last_run_at` is seeded and deferred (fresh installs never mutate on tick one).
 

@@ -122,14 +122,30 @@ def test_tick_gates_on_idle_and_notifies(herdr_env, monkeypatch):
     assert ["notification", "show", "Curator", "--body", "curator: done"] == fake.calls[-1][:5]
 
 
-def test_startup_shows_first_run_notice_once(herdr_env):
+def test_startup_shows_first_run_notice_until_daemon_seeds(herdr_env):
     h, fake, state = herdr_env["herdr"], herdr_env["fake"], herdr_env["state"]
     h.startup(spawn_daemon=False)
     notices = [c for c in fake.calls if c[:2] == ["notification", "show"]]
     assert notices and "deferred" in notices[0][4]
+    h.tick(idle_for_seconds=float("inf"))  # the daemon's first tick seeds last_run_at
     fake.calls.clear()
     h.startup(spawn_daemon=False)
     assert not [c for c in fake.calls if c[:2] == ["notification", "show"]]
+
+
+def test_startup_never_runs_a_pass_and_spawns_daemon_with_first_idle_inf(herdr_env, monkeypatch):
+    """The startup hook process exits at once; a pass started there would die mid-flight."""
+    from curator import curator
+    h = herdr_env["herdr"]
+    old = (datetime.now(timezone.utc) - timedelta(hours=24 * 8)).isoformat()
+    curator.save_state({**curator.load_state(), "last_run_at": old})  # interval elapsed: a tick would run
+    monkeypatch.setattr(curator, "run_curator_review", lambda **kw: (_ for _ in ()).throw(AssertionError("pass ran in startup")))
+    monkeypatch.setattr(h, "tick", lambda **kw: (_ for _ in ()).throw(AssertionError("startup ticked")))
+    spawned = []
+    monkeypatch.setattr(h, "_spawn_detached", lambda args: spawned.append(args))
+    assert h.startup() == 0
+    assert spawned == [["daemon", "--first-idle", "inf"]]
+    assert curator.load_state()["last_run_at"] == old  # untouched: no seed, no bump
 
 
 def test_startup_shows_recent_run_rename_map(herdr_env):
@@ -145,7 +161,7 @@ def test_startup_shows_recent_run_rename_map(herdr_env):
 def test_daemon_pidfile_single_instance_and_tick_loop(herdr_env, monkeypatch):
     h, state = herdr_env["herdr"], herdr_env["state"]
     ticks = []
-    monkeypatch.setattr(h, "tick", lambda **kw: ticks.append(1))
+    monkeypatch.setattr(h, "tick", lambda **kw: ticks.append(kw))
     stop_after = {"n": 3}
 
     def _sleep(seconds):
@@ -155,6 +171,9 @@ def test_daemon_pidfile_single_instance_and_tick_loop(herdr_env, monkeypatch):
     monkeypatch.setattr(h.time, "sleep", _sleep)
     h.daemon(interval=1)
     assert len(ticks) == 3 and not (state / "daemon.pid").exists()
+    # first tick observes first_idle (∞ from startup), later ticks measure; every tick is synchronous
+    assert ticks[0] == {"idle_for_seconds": float("inf"), "synchronous": True}
+    assert ticks[1:] == [{"idle_for_seconds": "measure", "synchronous": True}] * 2
     (state / "daemon.pid").write_text(str(os.getppid()))  # a live pid that is not us
     assert h.daemon(interval=1) == 1  # another live instance owns the pidfile
     (state / "daemon.pid").write_text("999999999")
@@ -175,6 +194,32 @@ def test_daemon_exits_when_herdr_socket_disappears(herdr_env, monkeypatch, tmp_p
     monkeypatch.setattr(h, "tick", _tick)
     monkeypatch.setattr(h.time, "sleep", lambda s: None)
     assert h.daemon(interval=1) == 0 and len(ticks) == 1
+
+
+def test_daemon_first_idle_flag_and_pass_runs_in_process(herdr_env, monkeypatch):
+    """A live daemon restarted by hand (first_idle=0) must not treat itself as idle, and the pass it
+    eventually runs executes inside the loop (synchronous) so process exit can never cut it short."""
+    from curator import curator
+    h = herdr_env["herdr"]
+    old = (datetime.now(timezone.utc) - timedelta(hours=24 * 8)).isoformat()
+    curator.save_state({**curator.load_state(), "last_run_at": old})
+    calls = []
+    monkeypatch.setattr(curator, "run_curator_review", lambda **kw: calls.append(kw) or {"started_at": "x"})
+    monkeypatch.setattr(h, "idle_for_seconds", lambda: 0.0)
+    monkeypatch.setattr(h.time, "sleep", lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    assert h.daemon(interval=1, first_idle=0.0) == 0 and calls == []  # min_idle_hours not met
+    assert h.daemon(interval=1) == 0 and len(calls) == 1  # default first_idle=inf: session start is idle
+    assert calls[0]["synchronous"] is True
+
+
+def test_daemon_verb_parses_first_idle(monkeypatch):
+    from curator import __main__ as main_mod, herdr
+    seen = {}
+    monkeypatch.setattr(herdr, "daemon", lambda **kw: seen.update(kw) or 0)
+    assert main_mod._plugin_verb("daemon", ["--first-idle", "inf", "--interval", "5"]) == 0
+    assert seen == {"interval": 5.0, "first_idle": float("inf")}
+    main_mod._plugin_verb("daemon", [])
+    assert seen == {"interval": 60.0, "first_idle": float("inf")}
 
 
 def test_action_dispatch_opens_expected_panes(herdr_env, monkeypatch):
@@ -287,7 +332,7 @@ def test_startup_reconciles_hooks_and_notifies_only_on_change(herdr_env, monkeyp
     results = iter([{"installed": ["claude", "codex"], "registered": ["~/.agents/skills"], "failed": [], "launcher": "x"},
                     {"installed": [], "registered": [], "failed": [], "launcher": "x"}])
     monkeypatch.setattr(integrations, "reconcile", lambda: next(results))
-    monkeypatch.setattr(h, "tick", lambda **kw: None)
+    monkeypatch.setattr(h, "tick", lambda **kw: (_ for _ in ()).throw(AssertionError("startup ticked")))
     h.startup(spawn_daemon=False)
     bodies = [c[4] for c in fake.calls if c[:2] == ["notification", "show"]]
     assert any("claude, codex" in b and "/hooks" in b and ".agents/skills" in b for b in bodies)
@@ -300,7 +345,7 @@ def test_startup_survives_reconcile_failure(herdr_env, monkeypatch):
     from curator import integrations
     h, fake = herdr_env["herdr"], herdr_env["fake"]
     monkeypatch.setattr(integrations, "reconcile", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    monkeypatch.setattr(h, "tick", lambda **kw: None)
+    monkeypatch.setattr(h, "tick", lambda **kw: (_ for _ in ()).throw(AssertionError("startup ticked")))
     assert h.startup(spawn_daemon=False) == 0
     assert any("hook setup failed: boom" in c[4] for c in fake.calls if c[:2] == ["notification", "show"])
 

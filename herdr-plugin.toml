@@ -17,8 +17,9 @@ command = ["sh", "-c", "python3 -c 'import sys; assert sys.version_info >= (3, 9
 command = ["sh", "-c", "exec python3 bin/curator hooks launcher"]
 
 # Session start: reconcile telemetry hooks in the host agents (launcher, auto-install, skill dirs),
-# show the first-run / rename-map notices, run one fully-idle tick, then spawn the detached 60 s
-# scheduler daemon.
+# show the first-run / rename-map notices, then spawn the detached 60 s scheduler daemon. The hook
+# never runs a pass itself (this process exits at once); the daemon's first tick is the fully-idle
+# session-start observation and every pass runs synchronously inside the daemon.
 [[startup]]
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" startup"]
 
