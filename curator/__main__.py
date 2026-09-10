@@ -1,7 +1,7 @@
 """``python -m curator`` / ``bin/curator`` — one entrypoint for every surface.
 
-    curator <hermes verb> ...      the ported `hermes curator` CLI (status, run, pin, ...)
-    curator skills [...]           the `hermes skills` TUI: enable/disable, browse, edit
+    curator <verb> ...             the curator CLI (status, run, pin, ...)
+    curator skills [...]           the skills TUI: enable/disable, browse, edit
     curator mcp-serve ...          skills toolset over MCP for the consolidation fork
     curator startup                Herdr [[startup]] hook: notices, one tick, spawn daemon
     curator daemon [--interval S]  the 60 s scheduler tick loop (single instance)
@@ -22,7 +22,7 @@ _EXTRA = ("skills", "mcp-serve", "startup", "daemon", "tick", "action", "pane", 
 def _usage() -> str:
     from curator.cli import _SUBCOMMANDS
     verbs = ", ".join(n for n, *_ in _SUBCOMMANDS)
-    return (f"usage: curator <verb> ...\n\n  Hermes curator verbs: {verbs}\n"
+    return (f"usage: curator <verb> ...\n\n  Curator verbs: {verbs}\n"
             f"  Plugin verbs: {', '.join(_EXTRA)}\n\nRun `curator <verb> --help` for details.")
 
 

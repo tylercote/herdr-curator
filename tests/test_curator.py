@@ -1,4 +1,4 @@
-"""curator.curator — orchestrator, idle gating, state transitions (port of upstream test_curator.py).
+"""curator.curator — orchestrator, idle gating, state transitions.
 
 LLM spawning is never exercised here — ``_run_llm_review`` is monkeypatched so
 tests run fully offline.

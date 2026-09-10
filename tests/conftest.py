@@ -2,7 +2,7 @@
 
 Every module under ``curator/`` resolves its paths at CALL time through
 ``curator.paths`` (never at import), so an isolated home is just an env var:
-no ``importlib.reload`` dance like the upstream Hermes tests need.
+no ``importlib.reload`` dance.
 """
 
 from __future__ import annotations
@@ -29,16 +29,15 @@ def write_skill(skills_dir: Path, name: str, category: str = "", body: str = "# 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    """Isolated curator home: ``<tmp>/.hermes`` with an empty ``skills/``.
+    """Isolated, self-contained curator home with an empty ``skills/``.
 
     Pins ``curator.prune_builtins`` OFF via config so bundled-protection tests
     exercise the off-path regardless of the shipped default; tests flip it
     with ``set_config``.
     """
-    h = tmp_path / ".hermes"
+    h = tmp_path / "curator-home"
     (h / "skills").mkdir(parents=True)
     monkeypatch.setenv("CURATOR_HOME", str(h))
-    monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.delenv("CURATOR_SKILLS_DIR", raising=False)
     monkeypatch.delenv("CURATOR_CONFIG", raising=False)
     monkeypatch.delenv("HERDR_PLUGIN_CONFIG_DIR", raising=False)
@@ -50,6 +49,33 @@ def home(tmp_path, monkeypatch):
     _config.clear_cache()
     yield h
     _config.clear_cache()
+
+
+@pytest.fixture
+def herdr_layout(tmp_path, monkeypatch):
+    """No explicit home: the layout a plain Herdr install sees, with HOME and both XDG
+    roots redirected into ``tmp_path``. Yields ``tmp_path``."""
+    for var in ("CURATOR_HOME", "CURATOR_SKILLS_DIR", "CURATOR_CONFIG",
+                "HERDR_PLUGIN_CONFIG_DIR", "HERDR_PLUGIN_STATE_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    from curator import config as _config
+    _config.clear_cache()
+    yield tmp_path
+    _config.clear_cache()
+
+
+@pytest.fixture
+def essential(monkeypatch):
+    """Declare ``core`` an essential skill. ``skills_tui`` binds the name at import, so both
+    bindings are patched; ``skill_manager_guards`` reads ``skill_utils`` at call time."""
+    from curator import skill_utils, skills_tui
+    pinned = frozenset({"core"})
+    monkeypatch.setattr(skill_utils, "ESSENTIAL_SKILLS", pinned)
+    monkeypatch.setattr(skills_tui, "ESSENTIAL_SKILLS", pinned)
+    return "core"
 
 
 @pytest.fixture

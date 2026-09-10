@@ -1,4 +1,4 @@
-"""curator.skill_utils — the subset of Hermes ``agent/skill_utils.py`` the curator needs."""
+"""curator.skill_utils — scanner, frontmatter, dirs, platform gating."""
 
 from __future__ import annotations
 
@@ -27,12 +27,12 @@ def test_parse_frontmatter_strips_bom_and_handles_missing():
 def test_parse_frontmatter_nested_metadata_and_multiline_list():
     from curator.skill_utils import parse_frontmatter
     text = (
-        "---\nname: c\ndescription: d\nmetadata:\n  hermes:\n    agent_created: true\n"
+        "---\nname: c\ndescription: d\nmetadata:\n  curator:\n    agent_created: true\n"
         "    tags:\n      - one\n      - two\nplatforms:\n  - linux\n---\nx"
     )
     fm, _ = parse_frontmatter(text)
-    assert fm["metadata"]["hermes"]["agent_created"] is True
-    assert fm["metadata"]["hermes"]["tags"] == ["one", "two"]
+    assert fm["metadata"]["curator"]["agent_created"] is True
+    assert fm["metadata"]["curator"]["tags"] == ["one", "two"]
     assert fm["platforms"] == ["linux"]
 
 

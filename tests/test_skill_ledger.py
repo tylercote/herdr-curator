@@ -1,4 +1,4 @@
-"""curator.skill_ledger — per-mutation audit ledger + rollback (port of upstream tests)."""
+"""curator.skill_ledger — per-mutation audit ledger + rollback."""
 
 from __future__ import annotations
 
@@ -246,7 +246,7 @@ def test_user_actor_override_and_derive_actor(home):
 
 
 # ---------------------------------------------------------------------------
-# Package-completeness fill from the newest curator backup (issue #96962)
+# Package-completeness fill from the newest curator backup
 # ---------------------------------------------------------------------------
 
 def test_delete_after_rehome_ledgers_full_package_from_backup(home):

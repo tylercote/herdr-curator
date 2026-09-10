@@ -1,8 +1,7 @@
-"""User-facing curator notices (port of the curator bits of ``hermes_cli/update_cmd_maint.py``).
+"""User-facing curator notices.
 
-Hermes prints these on ``hermes update``; Herdr has no such moment, so the
-plugin's startup hook shows them as Herdr notifications instead. The text
-helpers return the lines so the host layer can route them anywhere.
+The plugin's startup hook shows them as Herdr notifications. The text helpers
+return the lines so the host layer can route them anywhere.
 """
 
 from __future__ import annotations

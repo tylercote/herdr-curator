@@ -1,6 +1,6 @@
-"""Scheduled-job store subset (port of the ``cron/jobs.py`` surface the curator uses).
+"""Scheduled-job store — the subset the curator uses.
 
-Hermes stores jobs in ``<home>/cron/jobs.json`` as ``{"jobs": [...], "updated_at": ...}``.
+Jobs live in ``<home>/cron/jobs.json`` as ``{"jobs": [...], "updated_at": ...}``.
 The curator needs two things from it:
 
 * ``referenced_skill_names()`` — skills any job (paused or not) lists, so the

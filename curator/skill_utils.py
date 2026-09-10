@@ -4,11 +4,11 @@ Scanner rules, frontmatter parsing, skills-dir enumeration (local / create_dir /
 external / trusted project), external-ownership checks, lookup-name
 normalisation, platform gating and description truncation.
 
-YAML: Hermes uses PyYAML. Without a dependency this module ships a small
-block-YAML reader (``_MiniYaml``) covering what SKILL.md frontmatter actually
-uses — nested mappings, block + flow sequences, quoted/plain scalars, comments.
-PyYAML is used when importable; a parse failure falls back to Hermes's own
-``key: value`` line split, exactly as upstream.
+YAML: without a dependency this module ships a small block-YAML reader
+(``_MiniYaml``) covering what SKILL.md frontmatter actually uses — nested
+mappings, block + flow sequences, quoted/plain scalars, comments. PyYAML is
+used when importable; a parse failure falls back to a plain ``key: value``
+line split.
 """
 
 from __future__ import annotations
@@ -36,11 +36,12 @@ SKILL_SUPPORT_DIRS = frozenset(("references", "templates", "assets", "scripts"))
 ORG_MIRROR_DIR_NAME = "_org"
 ORG_ACTIVE_MARKER = ".active_org"
 
-# Permanently pinned by the system prompt in Hermes; kept for message parity.
-ESSENTIAL_SKILLS: frozenset = frozenset({"hermes-agent"})
+# Skills that can never be disabled or deleted. Nothing is system-pinned under Herdr,
+# so this is empty by default; the mechanism stays so a host can pin its own.
+ESSENTIAL_SKILLS: frozenset = frozenset()
 
 SKILL_PROMPT_DESC_LIMIT = 60
-PROJECT_SKILLS_SUBDIRS = (os.path.join(".hermes", "skills"), os.path.join(".agents", "skills"))
+PROJECT_SKILLS_SUBDIRS = (os.path.join(".claude", "skills"), os.path.join(".agents", "skills"))
 _PROJECT_ROOT_MAX_DEPTH = 64
 
 
@@ -363,7 +364,7 @@ def get_disabled_skill_names(platform: Optional[str] = None) -> Set[str]:
     from curator.config import cfg_get, load_config_readonly
     skills_cfg = load_config_readonly().get("skills") or {}
     names = set(parse_config_string_list(skills_cfg.get("disabled")))
-    resolved = platform or os.environ.get("HERMES_PLATFORM") or ""
+    resolved = platform or os.environ.get("CURATOR_PLATFORM") or ""
     if resolved:
         names |= set(parse_config_string_list(cfg_get(skills_cfg, "platform_disabled", resolved)))
     return names
@@ -406,7 +407,7 @@ def get_skill_create_dir() -> Optional[Path]:
 
 def display_skill_create_dir() -> str:
     create = get_skill_create_dir()
-    return str(create) if create else f"{paths.display_home()}/skills/"
+    return str(create) if create else f"{paths.display_skills_dir()}/"
 
 
 def get_all_skills_dirs() -> List[Path]:

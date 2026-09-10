@@ -4,10 +4,9 @@ curator-relevant subset of ``tools/skills_tool.py``).
 ``skill_view`` is also the read-before-write authorisation for the background
 review fork: it marks the exact file it served so a later ``skill_manage`` on
 that file is allowed. ``skill_view_with_bump`` (the handler the MCP server
-registers) additionally records ``view`` + ``use`` telemetry, exactly like the
-Hermes tool registration does.
+registers) additionally records ``view`` + ``use`` telemetry.
 
-Not ported (Hermes-runtime concerns): plugin-provided skills, SKILL.md template
+Not supported (host-runtime concerns): plugin-provided skills, SKILL.md template
 variables / inline shell preprocessing, readiness (config-var) checks, org
 provenance headers, project-skill quarantine, and the per-session repeat-view
 dedup stub.
@@ -285,8 +284,7 @@ def skill_view(name: str, file_path: Optional[str] = None, task_id: Optional[str
             return _serve_skill_file(skill_dir, file_path, name, list_available=True, mark_read=True,
                                      hint="Use a relative path within the skill directory")
         metadata = frontmatter.get("metadata")
-        hermes_meta = (metadata.get("hermes", {}) or {}) if isinstance(metadata, dict) else {}
-        tags, related_skills = (_parse_tags(hermes_meta.get(k) or frontmatter.get(k, "")) for k in ("tags", "related_skills"))
+        tags, related_skills = (_parse_tags(frontmatter.get(k, "")) for k in ("tags", "related_skills"))
         linked_files = _skill_linked_files(skill_dir)
         try:
             rel_path = str(skill_md.relative_to(active_skills_dir))

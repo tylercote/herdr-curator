@@ -1,8 +1,7 @@
 """Herdr host integration — everything that talks to the Herdr binary or runs inside a Herdr pane.
 
-Hermes triggers the curator from two places: the CLI session-start hook
-(idle = ∞) and a 60-second tick in the gateway's housekeeping thread (idle =
-∞ there too). Here:
+The curator has two trigger points — session start (idle = ∞) and a
+60-second background tick. Here:
 
 * ``startup``  — the manifest ``[[startup]]`` hook. Shows the first-run /
   recent-run notices as Herdr notifications, runs one ``tick`` (fully idle,
@@ -171,7 +170,7 @@ def startup(*, spawn_daemon: bool = True) -> int:
     recent = notices.recent_run_notice_text(mark_shown=True)
     if recent:
         notify(NOTIFY_TITLE, body="\n".join(recent))
-    tick(idle_for_seconds=float("inf"))  # session start == fully idle (Hermes CLI semantics)
+    tick(idle_for_seconds=float("inf"))  # session start == fully idle
     if spawn_daemon:
         _spawn_detached(["daemon"])
     return 0
@@ -204,7 +203,7 @@ def _socket_present() -> bool:
 
 
 def daemon(interval: float = 60.0) -> int:
-    """The Hermes gateway "Curator tick" (60 s) as a detached, single-instance loop."""
+    """The 60 s curator tick as a detached, single-instance loop."""
     pidfile = paths.plugin_state_dir() / "daemon.pid"
     try:
         pidfile.parent.mkdir(parents=True, exist_ok=True)

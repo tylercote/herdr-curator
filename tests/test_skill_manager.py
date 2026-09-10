@@ -478,10 +478,10 @@ class TestPinnedGuard:
         assert "curator unpin my-skill" in result["error"]
         assert (home / "skills" / "my-skill" / "SKILL.md").exists()
 
-    def test_essential_skill_never_deleted(self, home):
+    def test_essential_skill_never_deleted(self, home, essential):
         from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill("hermes-agent", VALID_SKILL_CONTENT)
-        result = _delete_skill("hermes-agent")
+        _create_skill(essential, VALID_SKILL_CONTENT)
+        result = _delete_skill(essential)
         assert result["success"] is False and "essential" in result["error"]
 
     def test_broken_sidecar_fails_open(self, home, monkeypatch):

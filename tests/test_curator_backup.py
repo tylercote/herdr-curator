@@ -1,4 +1,4 @@
-"""curator.curator_backup — tar.gz snapshot + rollback of the skills tree (port of upstream)."""
+"""curator.curator_backup — tar.gz snapshot + rollback of the skills tree."""
 
 from __future__ import annotations
 

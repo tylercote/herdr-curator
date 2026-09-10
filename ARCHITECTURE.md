@@ -1,13 +1,11 @@
 # Architecture
 
 This document explains how `herdr-curator` is built and *why* each piece exists.
-It is written for someone who has to modify the plugin months from now. Every
-module also carries a docstring naming the Hermes file it mirrors;
-`docs/PARITY.md` is the function-level map.
+It is written for someone who has to modify the plugin months from now.
 
 ## 1. What the Curator is
 
-Hermes Agent's self-improvement loop writes skills (`<name>/SKILL.md` +
+A coding agent's self-improvement loop writes skills (`<name>/SKILL.md` +
 optional `references/ templates/ scripts/ assets/`). Left alone, that library
 fills with narrow one-incident skills. The **Curator** is the maintenance
 system around it:
@@ -21,18 +19,25 @@ system around it:
 | shrink the library intelligently | an optional LLM pass whose tool surface is exactly `skills_list / skill_view / skill_manage`, audited afterwards |
 | tell the user | `run.json` + `REPORT.md` per run, a rename map in the summary, `status` |
 
-Parity target: `NousResearch/hermes-agent` at `79445a49` (2026-09-04).
-
 ## 2. Layout on disk
 
+One rule: an explicit `CURATOR_HOME` is a self-contained tree (tests, multi-home
+tooling); otherwise the plugin lives in Herdr's plugin directories and curates
+Claude Code's skills. Herdr passes `HERDR_PLUGIN_STATE_DIR` / `HERDR_PLUGIN_CONFIG_DIR`
+to manifest commands; the XDG fallbacks reconstruct the same paths, so a bare
+`curator` in any shell and the scheduled plugin run agree on every path.
+
 ```
-<home>                     CURATOR_HOME | HERMES_HOME | ~/.hermes
-├── config.json            plugin config (same key tree as Hermes config.yaml)
+<home>                     CURATOR_HOME | HERDR_PLUGIN_STATE_DIR | ${XDG_STATE_HOME:-~/.local/state}/herdr/plugins/curator
 ├── logs/curator/<stamp>/  run.json, REPORT.md, [cron_rewrites.json]
 │   └── .runs/<stamp>/     LLM pass artifacts: prompt.txt, mcp.json, stdout/stderr, tool_calls.jsonl
 ├── .curator_backups/blobs/<sha256>          ledger blob store (content-addressed)
 ├── cron/jobs.json         scheduled jobs — skill references are protected + rewritten
-└── skills/                CURATOR_SKILLS_DIR | config skills.dir | <home>/skills
+├── daemon.pid, activity.json               (plugin state; under <home>/.curator_plugin/ for an explicit home)
+│
+<config>/config.json       CURATOR_CONFIG | $HERDR_PLUGIN_CONFIG_DIR | <home> (explicit home)
+                           | ${XDG_CONFIG_HOME:-~/.config}/herdr/plugins/config/curator
+<skills>/                  CURATOR_SKILLS_DIR | config skills.dir | <home>/skills (explicit home) | ~/.claude/skills
     ├── <name>/SKILL.md [references/ templates/ scripts/ assets/]
     ├── <category>/<name>/SKILL.md
     ├── .usage.json        telemetry + provenance sidecar  (+ .usage.json.lock)
@@ -46,7 +51,7 @@ Parity target: `NousResearch/hermes-agent` at `79445a49` (2026-09-04).
 ```
 
 The split — sidecars and snapshots *inside* `skills/`, blobs and logs *under
-home* — is Hermes's and is load-bearing: snapshots exclude `.curator_backups`,
+home* — is load-bearing: snapshots exclude `.curator_backups`,
 `.hub`, `.git`; the ledger blob store must survive a tree rollback.
 
 ## 3. Module graph
@@ -95,7 +100,7 @@ eligible ones):
 collision), toggles the suppression list for built-ins, sets `state=archived`,
 and records a `complete_package` ledger entry — one whose before-manifest is
 filled from the newest snapshot so a skill whose support files were re-homed
-earlier in a consolidation still rolls back whole (Hermes issue #96962).
+earlier in a consolidation still rolls back whole.
 
 ## 5. Provenance: who may be curated
 
@@ -130,9 +135,8 @@ with `prune_builtins`. `set_state`, `set_pinned`, `mark_agent_created` and
 
 ## 7. The LLM consolidation pass
 
-Hermes forks its in-process `AIAgent` with `enabled_toolsets=["skills"]`, no
-terminal, `max_iterations=9999`, write origin `background_review`. Herdr has
-no agent runtime, so `llm_review.run_review` reproduces the same *contract*:
+The pass runs on a headless coding agent whose only tools are the three skills
+tools, under the `background_review` write origin. `llm_review.run_review`:
 
 ```
 run_review(prompt)
@@ -152,10 +156,10 @@ run_review(prompt)
 `skill_provenance.BACKGROUND_REVIEW`, so inside the server process:
 
 - `skill_view` marks the exact file it served (`mark_background_review_skill_read`); a later `skill_manage` write to a file that was **not** viewed in this review is refused (`_read_before_write_required`). Marks live in a ContextVar holding a lock-protected set, so copied contexts within one review share them and separate reviews do not.
-- ownership guard: pinned, external, protected, hub, bundled and **not-curator-managed** skills are refused with the `curator adopt <name>` hint — and the answer is stable across repeated identical attempts (the guard keys on the record's *value*, not its existence; Hermes #67140).
-- delete requires `absorbed_into=<existing umbrella>`; `""`/omitted is refused with `_fail_closed` (Hermes #29912). A verified consolidation **archives** (recoverable) instead of `rmtree`.
+- ownership guard: pinned, external, protected, hub, bundled and **not-curator-managed** skills are refused with the `curator adopt <name>` hint — and the answer is stable across repeated identical attempts (the guard keys on the record's *value*, not its existence).
+- delete requires `absorbed_into=<existing umbrella>`; `""`/omitted is refused with `_fail_closed`. A verified consolidation **archives** (recoverable) instead of `rmtree`.
 - every call is appended to `tool_calls.jsonl` as `{name, arguments}`; ledger entries carry `actor=curator`.
-- `--dry-run` refuses mutating actions at the server. *Hermes relies on the prompt banner alone; this is deliberate hardening and the only behavioural addition in the pass.*
+- `--dry-run` refuses mutating actions at the server, not just in the prompt banner.
 
 After the pass, `curator._diff_and_classify` decides for every skill that
 disappeared between the before/after `curated_report()`:
@@ -171,31 +175,30 @@ entry, plus `⚠` when the model named an umbrella that does not exist.
 
 ## 8. Scheduling inside Herdr
 
-Hermes calls `maybe_run_curator(idle_for_seconds=∞)` at CLI start and every
-60 s from the gateway. Here:
+Two trigger points:
 
 - `[[startup]]` → `curator startup`: notices as Herdr notifications, one tick with idle = ∞, spawn `curator daemon` detached (`start_new_session`).
-- `curator daemon`: pidfile in `HERDR_PLUGIN_STATE_DIR` (stale pids reclaimed), loop `tick(); sleep 60`, exits when `HERDR_SOCKET_PATH` disappears.
+- `curator daemon`: pidfile in `paths.plugin_state_dir()` (stale pids reclaimed), loop `tick(); sleep 60`, exits when `HERDR_SOCKET_PATH` disappears.
 - `tick`: `idle_for_seconds()` = seconds since any `herdr agent list` entry was `working`/`blocked` (persisted in `activity.json` so the clock survives restarts); `None` when Herdr is unavailable, which `maybe_run_curator` treats as not-measurable → fully idle (CLI semantics).
 - `should_run_now`: enabled, not paused, `last_run_at` present **and** older than `interval_hours`; a missing `last_run_at` is seeded and deferred (fresh installs never mutate on tick one).
 
-Run summaries reach the user via `herdr notification show`, and the once-per-run rename map via the startup notice (Hermes shows it on `hermes update`).
+Run summaries reach the user via `herdr notification show`, and the once-per-run rename map via the startup notice.
 
 ## 8b. Skills TUI (`skills_tui.py`)
 
-`hermes skills` is a curses checklist where *selected* = enabled, persisted to
+A curses checklist where *selected* = enabled, persisted to
 `skills.disabled` / `skills.platform_disabled.<platform>`, with `ESSENTIAL_SKILLS`
-never disableable and categories toggleable as a block. `skills_tui` ports
-that (`get_disabled_skills` / `save_disabled_skills` write only the user
-`config.json` layer via `config.update_user_config`, never freezing defaults)
-and layers the curator's view on the same rows:
+never disableable and categories toggleable as a block (`get_disabled_skills` /
+`save_disabled_skills` write only the user `config.json` layer via
+`config.update_user_config`, never freezing defaults), with the curator's view
+layered on the same rows:
 
 ```
 SkillsModel   rows() = skill_usage.usage_report() ⊕ skills_tool._find_all_skills(skip_disabled=True)
               ⊕ .archive/ names  → {name, category, description, provenance, state, pinned, managed,
               enabled, counts, last_activity_at, path}
-              set_enabled / toggle_enabled / set_category_enabled (Hermes convention: a category is
-              enabled unless ALL its skills are disabled) · adopt / pin / archive / restore (same rules
+              set_enabled / toggle_enabled / set_category_enabled (a category is enabled unless
+              ALL its skills are disabled) · adopt / pin / archive / restore (same rules
               as the CLI, ledger actor=user) · view() · edit()
 Controller    curses-free key handling (list / filter / view / help modes) + render_lines(width, height)
 run_tui       curses loop: paint render_lines, decode keys, suspend curses around $EDITOR
@@ -210,7 +213,7 @@ exactly like an agent patch.
 
 ## 9. Configuration
 
-`config.py` deep-merges `DEFAULT_CONFIG` ← optional `<home>/config.yaml` (PyYAML only) ← `config.json` (`CURATOR_CONFIG` > `$HERDR_PLUGIN_CONFIG_DIR/config.json` > `<home>/config.json`), cached on `(mtime_ns, size)`. Keys and defaults are Hermes's:
+`config.py` deep-merges `DEFAULT_CONFIG` ← `config.json` (resolved as in §2), cached on `(mtime_ns, size)`. Keys and defaults:
 
 ```
 curator.{enabled, interval_hours=168, min_idle_hours=2, stale_after_days=30, archive_after_days=90,
@@ -224,18 +227,19 @@ curator.auxiliary.{provider,model} ← legacy, still honoured with a deprecation
 
 ## 10. Testing strategy
 
-Red/green from the Hermes suite: `tests/` ports the upstream tests for every
-module (`test_curator*.py`, `test_skill_usage.py`, `test_skill_ledger.py`,
-`test_curator_backup.py`, `test_cron_jobs.py`, `test_cli.py`,
-`test_skill_manager.py`, …) so parity is *asserted*, then adds the plugin's own
-surfaces (`test_llm_review.py` with an injected spawner, `test_mcp_server.py`
-including a real `bin/curator mcp-serve` subprocess round-trip, `test_herdr.py`
-with a fake `herdr` binary and manifest/README consistency checks). The suite
-is offline; nothing spawns a real model. Run `uv run --with pytest pytest`.
+`tests/` covers every module (`test_curator*.py`, `test_skill_usage.py`,
+`test_skill_ledger.py`, `test_curator_backup.py`, `test_cron_jobs.py`,
+`test_cli.py`, `test_skill_manager.py`, …) plus the host surfaces
+(`test_llm_review.py` with an injected spawner, `test_mcp_server.py` including
+a real `bin/curator mcp-serve` subprocess round-trip, `test_herdr.py` with a
+fake `herdr` binary and manifest/README consistency checks). Every test runs
+under either the `home` fixture (explicit `CURATOR_HOME`) or `herdr_env` (Herdr
+layout with HOME and the XDG roots redirected). The suite is offline; nothing
+spawns a real model. Run `uv run --with pytest pytest`.
 
 ## 11. Extending
 
 - New Herdr action: add to `ACTIONS` in `herdr.py`, a `[[actions]]` block in the manifest, and the keybinding line in the README (a test enforces both).
 - New runner: add a branch to `llm_review.build_argv` / `parse_final`; keep the invariant that the agent has **no** tools besides the MCP server.
-- New telemetry source: call `curator bump {view,use,patch} <skill>` or `curator.skill_usage.bump_*` — the record shape is fixed by Hermes and read by `latest_activity_at`.
+- New telemetry source: call `curator bump {view,use,patch} <skill>` or `curator.skill_usage.bump_*` — the record shape is read by `latest_activity_at`.
 - Anything that mutates a skill directory must go through `skill_manage` or `skill_usage.archive_skill/restore_skill` so it is ledgered; a shell `mv` under `skills/` is exactly the bug class the ledger exists to catch.

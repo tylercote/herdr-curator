@@ -1,16 +1,15 @@
-"""Layered configuration (mirrors ``hermes_cli.config.load_config`` / ``cfg_get``
-and the curator-relevant slice of ``hermes_cli/config_defaults.py``).
+"""Layered configuration.
 
-Hermes reads ``~/.hermes/config.yaml`` via PyYAML. This plugin carries no
-third-party dependency, so its primary file is ``config.json`` with the SAME
-key tree. Precedence, lowest to highest:
+A single ``config.json`` deep-merged over ``DEFAULT_CONFIG``. Precedence for
+which file that is, highest first:
 
-    DEFAULT_CONFIG
-    <home>/config.yaml      (only if PyYAML is importable — a real Hermes home)
-    config.json             (CURATOR_CONFIG > $HERDR_PLUGIN_CONFIG_DIR/config.json > <home>/config.json)
+    CURATOR_CONFIG
+    $HERDR_PLUGIN_CONFIG_DIR/config.json          (set by Herdr for manifest commands)
+    <home>/config.json                            (explicit CURATOR_HOME only)
+    ${XDG_CONFIG_HOME:-~/.config}/herdr/plugins/config/curator/config.json
 
-Deep-merged, cached on the file signature ``(mtime_ns, size)`` exactly like
-Hermes so a read is cheap and an edit is picked up without restart.
+Cached on the file signature ``(mtime_ns, size)`` so a read is cheap and an
+edit is picked up without restart.
 """
 
 from __future__ import annotations
@@ -68,21 +67,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 _LOCK = threading.RLock()
-_CACHE: Dict[str, Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]], Dict[str, Any]]] = {}
+_CACHE: Dict[str, Tuple[Optional[Tuple[int, int]], Dict[str, Any]]] = {}
 
 
 def config_path() -> Path:
     explicit = os.environ.get("CURATOR_CONFIG")
     if explicit:
         return paths.expanduser(explicit)
-    plugin_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
-    if plugin_dir:
-        return Path(plugin_dir) / "config.json"
-    return paths.get_home() / "config.json"
-
-
-def yaml_config_path() -> Path:
-    return paths.get_home() / "config.yaml"
+    if os.environ.get("HERDR_PLUGIN_CONFIG_DIR"):
+        return paths.herdr_config_dir() / "config.json"
+    if paths.explicit_home():
+        return paths.get_home() / "config.json"
+    return paths.herdr_config_dir() / "config.json"
 
 
 def clear_cache() -> None:
@@ -116,24 +112,9 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _read_yaml(path: Path) -> Dict[str, Any]:
-    try:
-        import yaml  # type: ignore
-    except ImportError:
-        return {}
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
-    except Exception as e:
-        logger.debug("config: ignoring %s: %s", path, e)
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _build() -> Dict[str, Any]:
     merged = copy.deepcopy(DEFAULT_CONFIG)
-    ypath, jpath = yaml_config_path(), config_path()
-    if ypath.exists():
-        _deep_merge(merged, _read_yaml(ypath))
+    jpath = config_path()
     if jpath.exists():
         _deep_merge(merged, _read_json(jpath))
     return merged
@@ -141,15 +122,15 @@ def _build() -> Dict[str, Any]:
 
 def load_config_readonly() -> Dict[str, Any]:
     """Cached merged config. Never mutate the result — use ``load_config`` for that."""
-    jpath, ypath = config_path(), yaml_config_path()
-    key = f"{jpath}|{ypath}"
-    sig = (_signature(jpath), _signature(ypath))
+    jpath = config_path()
+    key = str(jpath)
+    sig = _signature(jpath)
     with _LOCK:
         cached = _CACHE.get(key)
-        if cached is not None and cached[:2] == sig:
-            return cached[2]
+        if cached is not None and cached[0] == sig:
+            return cached[1]
         built = _build()
-        _CACHE[key] = (sig[0], sig[1], built)
+        _CACHE[key] = (sig, built)
         return built
 
 

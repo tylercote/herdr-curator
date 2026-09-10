@@ -1,6 +1,5 @@
 """curator.skills_tui — enable/disable, browse and edit skills.
 
-Parity reference: ``hermes skills`` (hermes_cli/skills_config.py + curses_ui.curses_checklist):
 "selected" == enabled, essential skills can never be disabled, categories toggle as a block.
 Browse/edit is plugin-added: viewing is a pager, editing spawns $EDITOR on SKILL.md and the
 change is ledgered as ``actor=user`` + counted as a patch. The curses layer is a thin renderer
@@ -57,15 +56,15 @@ def test_set_enabled_writes_only_the_user_config_layer(home):
     assert {r["name"]: r["enabled"] for r in m.rows()} == {"a": True, "b": False}
 
 
-def test_essential_skills_cannot_be_disabled(home):
-    write_skill(home / "skills", "hermes-agent")
+def test_essential_skills_cannot_be_disabled(home, essential):
+    write_skill(home / "skills", essential)
     m = _model()
-    m.set_enabled(["hermes-agent"], False)
+    m.set_enabled([essential], False)
     assert _cfg(home)["skills"].get("disabled", []) == []
     assert m.rows()[0]["enabled"] is True
 
 
-def test_platform_scoped_disable_matches_hermes_layout(home):
+def test_platform_scoped_disable_layout(home):
     write_skill(home / "skills", "a")
     m = _model()
     m.set_enabled(["a"], False, platform="discord")
@@ -228,7 +227,7 @@ def test_render_lines_fit_width(ctrl):
 
 # --- CLI surface ------------------------------------------------------------------
 
-def test_skills_cli_list_enable_disable(home, capsys):
+def test_skills_cli_list_enable_disable(home, capsys, essential):
     from curator.skills_tui import cli_main
     write_skill(home / "skills", "a")
     write_skill(home / "skills", "b", category="c")
@@ -239,7 +238,7 @@ def test_skills_cli_list_enable_disable(home, capsys):
     assert _cfg(home)["skills"]["disabled"] == ["a", "b"]
     assert cli_main(["enable", "a"]) == 0
     assert _cfg(home)["skills"]["disabled"] == ["b"]
-    assert cli_main(["disable", "hermes-agent"]) == 1
+    assert cli_main(["disable", essential]) == 1
     assert "essential" in capsys.readouterr().out
     assert cli_main(["--list", "--json"]) == 0
     rows = json.loads(capsys.readouterr().out)

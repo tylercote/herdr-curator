@@ -1,7 +1,6 @@
 """curator.skill_usage — sidecar telemetry + provenance filtering.
 
-Port of Hermes ``tests/tools/test_skill_usage.py`` plus the archive/restore,
-reporting and eligibility cases exercised elsewhere upstream.
+Telemetry, provenance, archive/restore, reporting and eligibility.
 """
 
 from __future__ import annotations

@@ -1,7 +1,6 @@
 """Skills TUI — enable/disable, browse, edit (``curator skills``; Herdr pane ``skills``).
 
-Parity reference is ``hermes skills`` (``hermes_cli/skills_config.py`` +
-``curses_ui.curses_checklist``): a checklist where *selected* means *enabled*,
+A checklist where *selected* means *enabled*,
 persisted to ``skills.disabled`` (or ``skills.platform_disabled.<platform>``),
 with essential skills never disableable and whole categories toggleable.
 
@@ -32,7 +31,7 @@ from curator import config as _config
 from curator import paths
 from curator.skill_utils import ESSENTIAL_SKILLS
 
-# --- disabled-skills config (port of hermes_cli/skills_config.py) --------------------
+# --- disabled-skills config ----------------------------------------------------------
 
 def _normalize_skill_names(values) -> Set[str]:
     if values is None:
@@ -144,7 +143,7 @@ class SkillsModel:
         self.set_enabled(names, enabled, platform)
 
     def category_enabled(self, category: str, platform: Optional[str] = None) -> bool:
-        """A category is "enabled" when NOT all of its skills are disabled (Hermes convention)."""
+        """A category is "enabled" when NOT all of its skills are disabled."""
         rows = [r for r in self.rows(platform) if (r["category"] or "uncategorized") == category]
         return not rows or not all(not r["enabled"] for r in rows)
 

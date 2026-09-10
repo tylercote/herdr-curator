@@ -3,7 +3,7 @@ name = "Curator"
 version = "0.1.0"
 min_herdr_version = "0.8.0"
 platforms = ["macos", "linux"]
-description = "Hermes-parity skill curator: usage telemetry, stale/archive lifecycle, snapshots + audit ledger with rollback, and an opt-in LLM consolidation pass over your SKILL.md library."
+description = "Skill curator: usage telemetry, stale/archive lifecycle, snapshots + audit ledger with rollback, and an opt-in LLM consolidation pass over your SKILL.md library."
 
 # Every command goes through $HERDR_PLUGIN_ROOT/bin/curator because panes may open with the
 # user's repo (not the plugin) as cwd. Stdlib Python 3.9+ only — nothing to build or install.
@@ -11,8 +11,8 @@ description = "Hermes-parity skill curator: usage telemetry, stale/archive lifec
 [[build]]
 command = ["sh", "-c", "python3 -c 'import sys; assert sys.version_info >= (3, 9), sys.version'"]
 
-# Session start == Hermes CLI start: show the first-run / rename-map notices, run one fully-idle
-# tick, then spawn the detached 60 s scheduler daemon (== the Hermes gateway curator tick).
+# Session start: show the first-run / rename-map notices, run one fully-idle tick, then spawn
+# the detached 60 s scheduler daemon.
 [[startup]]
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" startup"]
 
@@ -49,7 +49,7 @@ command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane con
 [[actions]]
 id = "skills"
 title = "Curator: skills"
-description = "Enable/disable, browse and edit skills (the `hermes skills` checklist, plus pin/adopt/archive/restore/edit)."
+description = "Enable/disable, browse and edit skills (checklist, plus pin/adopt/archive/restore/edit)."
 contexts = ["global", "workspace", "pane"]
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action skills"]
 

@@ -1,8 +1,4 @@
-"""curator.cli — the ``curator <subcommand>`` surface (ports of the hermes_cli curator tests).
-
-Message parity note: Hermes prints ``hermes curator <verb>``; the plugin's
-program name is ``curator``, so the same hints read ``curator <verb>``.
-"""
+"""curator.cli — the ``curator <subcommand>`` surface."""
 
 from __future__ import annotations
 

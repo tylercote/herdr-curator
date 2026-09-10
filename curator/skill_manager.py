@@ -8,7 +8,7 @@ Every successful mutation is ledgered (before/after blobs) and reflected in the
 usage sidecar; the background-review guards make the same function safe to hand
 to the autonomous consolidation fork.
 
-Deliberately NOT ported (Hermes-runtime concerns; see docs/PARITY.md): the
+Not supported (host-runtime concerns): the
 security scanner (``skills.guard_agent_created``), the staged write-approval
 gate (``skills.write_approval``), advisory lint findings, the sync push, and
 other-profile lookups in not-found errors.
@@ -58,7 +58,7 @@ _NAME_RULE = "Use lowercase letters, numbers, hyphens, dots, and underscores."
 
 
 def _security_scan_skill(skill_dir: Path) -> Optional[str]:
-    """No security scanner is shipped with the plugin (Hermes: ``skills.guard_agent_created``, default off)."""
+    """No security scanner is shipped with the plugin (``skills.guard_agent_created`` is accepted but inert)."""
     return None
 
 
@@ -506,7 +506,7 @@ def skill_manage(action: str, name: str, content=None, category=None, file_path=
     return json.dumps(result, ensure_ascii=False)
 
 
-# --- Tool schema (OpenAI function-calling shape, as advertised by Hermes) -------
+# --- Tool schema (OpenAI function-calling shape) ---------------------------------
 
 SKILL_MANAGE_SCHEMA = {
     "name": "skill_manage",

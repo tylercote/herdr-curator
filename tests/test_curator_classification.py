@@ -1,5 +1,5 @@
 """curator.curator — consolidated-vs-pruned classifier, structured-summary parsing,
-reconciliation and the rename summary (port of upstream test_curator_classification.py)."""
+reconciliation and the rename summary."""
 
 from __future__ import annotations
 
@@ -142,11 +142,11 @@ def test_reconcile_absorbed_into_beats_everything_else(home):
     from curator import curator
     out = curator._reconcile_classification(
         removed=["pr-review-format"], heuristic={"consolidated": [], "pruned": [{"name": "pr-review-format"}]},
-        model_block={"consolidations": [], "prunings": []}, destinations={"hermes-agent-dev"},
-        absorbed_declarations={"pr-review-format": {"into": "hermes-agent-dev", "declared": True}})
+        model_block={"consolidations": [], "prunings": []}, destinations={"agent-dev"},
+        absorbed_declarations={"pr-review-format": {"into": "agent-dev", "declared": True}})
     assert out["pruned"] == [] and len(out["consolidated"]) == 1
     e = out["consolidated"][0]
-    assert e["name"] == "pr-review-format" and e["into"] == "hermes-agent-dev" and "absorbed_into" in e["source"]
+    assert e["name"] == "pr-review-format" and e["into"] == "agent-dev" and "absorbed_into" in e["source"]
 
 
 def test_reconcile_every_branch(home):

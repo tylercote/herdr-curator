@@ -1,18 +1,18 @@
-"""The Hermes ``skills`` toolset served over MCP (stdio, newline-delimited JSON-RPC 2.0).
+"""The ``skills`` toolset served over MCP (stdio, newline-delimited JSON-RPC 2.0).
 
 This is the fork's ENTIRE tool surface: ``skills_list``, ``skill_view``,
-``skill_manage`` — the same three the Hermes toolset resolves to. The process
+``skill_manage``. The process
 binds the ``background_review`` write origin for its whole life, so the
 ownership / read-before-write / consolidation-delete guards fire and every
 ledger entry is tagged ``actor=curator``; ``skill_view`` bumps view+use
-telemetry exactly like the Hermes tool registration.
+telemetry.
 
 Every ``tools/call`` is appended to ``<run-dir>/tool_calls.jsonl`` as
 ``{"name", "arguments"}`` (arguments as the JSON string the agent sent), which
 is what ``curator`` audits to classify removals as consolidated vs pruned.
 
 ``--dry-run`` additionally refuses mutating ``skill_manage`` actions at the
-server (Hermes relies on the prompt banner alone; this is documented hardening).
+server rather than trusting the prompt banner alone.
 """
 
 from __future__ import annotations

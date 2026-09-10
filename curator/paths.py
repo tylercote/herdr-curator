@@ -1,17 +1,26 @@
-"""Home + derived paths (mirrors ``hermes_constants.get_hermes_home`` and the
-``_skills_dir()`` / ``_archive_dir()`` / ... helpers scattered across Hermes).
+"""Home + derived paths.
 
 Everything is resolved at CALL time from the environment, never cached at
 import, so a process can be re-pointed (tests, multi-home tooling) with an env
 var alone.
 
-Resolution:
+Resolution -- one rule: an explicit ``CURATOR_HOME`` is a self-contained tree;
+otherwise the plugin lives where Herdr puts plugin data and curates Claude
+Code's skills.
 
-    home        CURATOR_HOME > HERMES_HOME > ~/.hermes
-    skills dir  CURATOR_SKILLS_DIR > config ``skills.dir`` > <home>/skills
+    home        CURATOR_HOME > HERDR_PLUGIN_STATE_DIR
+                > ${XDG_STATE_HOME:-~/.local/state}/herdr/plugins/curator
+    skills dir  CURATOR_SKILLS_DIR > config ``skills.dir``
+                > <home>/skills (explicit CURATOR_HOME only) > ~/.claude/skills
+    config      see ``curator.config.config_path``
 
-Layout (identical to Hermes — the split between "inside skills/" and "under
-home" is deliberate and load-bearing for rollback semantics):
+Herdr hands the plugin ``HERDR_PLUGIN_STATE_DIR`` / ``HERDR_PLUGIN_CONFIG_DIR``
+when it spawns a manifest command; the XDG fallbacks reconstruct the same
+directories so a bare ``curator`` in any shell lands on identical paths.
+
+Layout (the split between "inside skills/" and "under home" is deliberate and
+load-bearing for rollback semantics: snapshots exclude ``.curator_backups``,
+and the ledger blob store must survive a tree rollback):
 
     <skills>/.usage.json                 telemetry + provenance sidecar
     <skills>/.archive/<name>/            archived (recoverable) skills, flat
@@ -31,6 +40,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+PLUGIN_ID = "curator"  # must match ``id`` in herdr-plugin.toml
+
 
 def expanduser(raw: str) -> Path:
     """``~`` via ``Path.home()`` (patchable in tests; ``os.path.expanduser`` reads $HOME directly)."""
@@ -42,24 +53,59 @@ def expanduser(raw: str) -> Path:
     return Path(text).expanduser()
 
 
+def _xdg(var: str, default_subpath: str) -> Path:
+    raw = os.environ.get(var)
+    return expanduser(raw) if raw else Path.home() / default_subpath
+
+
+def explicit_home() -> bool:
+    """True when ``CURATOR_HOME`` is set: the caller wants a self-contained tree."""
+    return bool(os.environ.get("CURATOR_HOME"))
+
+
+def herdr_state_dir() -> Path:
+    """Where Herdr keeps this plugin's state (``HERDR_PLUGIN_STATE_DIR``, or its XDG location)."""
+    raw = os.environ.get("HERDR_PLUGIN_STATE_DIR")
+    return Path(raw) if raw else _xdg("XDG_STATE_HOME", ".local/state") / "herdr" / "plugins" / PLUGIN_ID
+
+
+def herdr_config_dir() -> Path:
+    """Where Herdr keeps this plugin's config (``HERDR_PLUGIN_CONFIG_DIR``, or its XDG location)."""
+    raw = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
+    return Path(raw) if raw else _xdg("XDG_CONFIG_HOME", ".config") / "herdr" / "plugins" / "config" / PLUGIN_ID
+
+
 def get_home() -> Path:
-    raw = os.environ.get("CURATOR_HOME") or os.environ.get("HERMES_HOME")
-    return expanduser(raw) if raw else Path.home() / ".hermes"
+    raw = os.environ.get("CURATOR_HOME")
+    return expanduser(raw) if raw else herdr_state_dir()
+
+
+def _display(path: Path) -> str:
+    """``~``-relative form for messages."""
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 def display_home() -> str:
-    """``~``-relative form for messages."""
-    home = get_home()
-    try:
-        return "~/" + str(home.relative_to(Path.home()))
-    except ValueError:
-        return str(home)
+    return _display(get_home())
+
+
+def display_skills_dir() -> str:
+    return _display(skills_dir())
 
 
 def expand_path(entry: str) -> Path:
     """``~`` and ``${VAR}`` expanded; a relative entry is relative to HOME."""
     p = expanduser(os.path.expandvars(str(entry)))
     return p if p.is_absolute() else get_home() / p
+
+
+def default_skills_dir() -> Path:
+    """The tree to curate when nothing points us at one: Claude Code's, unless the
+    caller asked for a self-contained home."""
+    return get_home() / "skills" if explicit_home() else Path.home() / ".claude" / "skills"
 
 
 def skills_dir() -> Path:
@@ -73,7 +119,7 @@ def skills_dir() -> Path:
         configured = ""
     if isinstance(configured, str) and configured.strip():
         return expand_path(configured.strip())
-    return get_home() / "skills"
+    return default_skills_dir()
 
 
 def usage_file() -> Path:
@@ -113,6 +159,9 @@ def cron_jobs_file() -> Path:
 
 
 def plugin_state_dir() -> Path:
-    """Herdr-provided state dir when running as a plugin, else ``<home>/.curator_plugin``."""
-    raw = os.environ.get("HERDR_PLUGIN_STATE_DIR")
-    return Path(raw) if raw else get_home() / ".curator_plugin"
+    """Daemon pidfile + activity clock. Herdr's explicit ``HERDR_PLUGIN_STATE_DIR`` wins;
+    a self-contained home keeps them in a subdir; otherwise this is Herdr's state dir,
+    which is also home."""
+    if os.environ.get("HERDR_PLUGIN_STATE_DIR"):
+        return herdr_state_dir()
+    return get_home() / ".curator_plugin" if explicit_home() else herdr_state_dir()

@@ -1,8 +1,7 @@
 """curator.cron_jobs — the ``cron/jobs.py`` subset the curator depends on.
 
-Hermes keeps scheduled jobs in ``~/.hermes/cron/jobs.json``; the curator reads
-skill references from it (protection) and rewrites them after consolidation.
-Port of ``tests/cron/test_rewrite_skill_refs.py`` plus reference canonicalisation.
+Scheduled jobs live in ``<home>/cron/jobs.json``; the curator reads skill
+references from it (protection) and rewrites them after consolidation.
 """
 
 from __future__ import annotations

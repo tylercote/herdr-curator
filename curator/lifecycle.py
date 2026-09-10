@@ -1,6 +1,6 @@
-"""Lifecycle hooks (mirrors ``hermes_cli.lifecycle.has_hook`` / ``invoke_hook``).
+"""Lifecycle hooks.
 
-Hermes plugins can subscribe to ``on_skill_lifecycle``; ``skill_usage`` emits
+Subscribers register for ``on_skill_lifecycle``; ``skill_usage`` emits
 ``created / loaded / patched / edited / installed / stale / archived / restored``
 facts through it. Here the registry is in-process (``register_hook``) — Herdr
 has no Python plugin bus — but the emission contract is identical so the

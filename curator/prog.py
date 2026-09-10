@@ -1,5 +1,5 @@
-"""The user-facing program name used in hints (Hermes prints ``hermes curator <verb>``;
-this plugin's CLI is ``curator <verb>``). Override with ``CURATOR_PROG`` if you alias it."""
+"""The user-facing program name used in hints (``curator <verb>``).
+Override with ``CURATOR_PROG`` if you alias it."""
 
 from __future__ import annotations
 

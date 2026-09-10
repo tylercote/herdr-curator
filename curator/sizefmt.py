@@ -1,4 +1,4 @@
-"""``hermes_cli.sizefmt.format_bytes`` — human sizes for the snapshot listing."""
+"""``format_bytes`` — human sizes for the snapshot listing."""
 
 from __future__ import annotations
 

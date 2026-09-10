@@ -1,9 +1,8 @@
 """curator.paths + curator.config — home/skills-dir resolution and layered config.
 
-Parity notes: Hermes reads ``~/.hermes/config.yaml`` (PyYAML). The plugin has no
-third-party deps, so its primary config is ``config.json`` with the SAME key
-tree; a ``config.yaml`` in the home is honoured only when PyYAML happens to be
-importable (a real Hermes home).
+An explicit ``CURATOR_HOME`` is a self-contained tree (the ``home`` fixture);
+without one the plugin uses Herdr's plugin dirs and Claude Code's skills
+(the ``herdr_layout`` fixture).
 """
 
 from __future__ import annotations
@@ -12,16 +11,16 @@ import json
 from pathlib import Path
 
 
-def test_home_prefers_curator_home_then_hermes_home_then_dot_hermes(tmp_path, monkeypatch):
+def test_home_prefers_curator_home_then_herdr_state_dir_then_xdg(herdr_layout, monkeypatch):
     from curator import paths
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.delenv("CURATOR_HOME", raising=False)
-    monkeypatch.delenv("HERMES_HOME", raising=False)
-    assert paths.get_home() == tmp_path / ".hermes"
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "h"))
-    assert paths.get_home() == tmp_path / "h"
-    monkeypatch.setenv("CURATOR_HOME", str(tmp_path / "c"))
-    assert paths.get_home() == tmp_path / "c"
+    tmp = herdr_layout
+    assert paths.get_home() == tmp / "xdg-state" / "herdr" / "plugins" / "curator"
+    monkeypatch.delenv("XDG_STATE_HOME")
+    assert paths.get_home() == tmp / ".local" / "state" / "herdr" / "plugins" / "curator"
+    monkeypatch.setenv("HERDR_PLUGIN_STATE_DIR", str(tmp / "state"))
+    assert paths.get_home() == tmp / "state"
+    monkeypatch.setenv("CURATOR_HOME", str(tmp / "c"))
+    assert paths.get_home() == tmp / "c"
 
 
 def test_home_expands_tilde(tmp_path, monkeypatch):
@@ -40,8 +39,53 @@ def test_skills_dir_defaults_under_home_and_honours_override(home, monkeypatch, 
     assert paths.skills_dir() == home / "env-wins"
 
 
-def test_derived_paths_match_hermes_layout(home):
-    """Hermes keeps sidecars INSIDE skills/ but blobs + logs under HOME. Preserve that split."""
+def test_skills_dir_defaults_to_claude_tree_under_herdr(herdr_layout):
+    from curator import paths
+    assert paths.skills_dir() == herdr_layout / ".claude" / "skills"
+    assert paths.display_skills_dir() == "~/.claude/skills"
+
+
+def test_explicit_home_is_self_contained(tmp_path, monkeypatch):
+    """CURATOR_HOME keeps skills, config and plugin state under itself — never Claude's tree."""
+    from curator import config, paths
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    for var in ("CURATOR_SKILLS_DIR", "CURATOR_CONFIG", "HERDR_PLUGIN_CONFIG_DIR", "HERDR_PLUGIN_STATE_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("CURATOR_HOME", str(tmp_path / "elsewhere"))
+    config.clear_cache()
+    assert paths.skills_dir() == tmp_path / "elsewhere" / "skills"
+    assert config.config_path() == tmp_path / "elsewhere" / "config.json"
+    assert paths.plugin_state_dir() == tmp_path / "elsewhere" / ".curator_plugin"
+    config.clear_cache()
+
+
+def test_bare_cli_and_plugin_resolve_identical_paths(herdr_layout, monkeypatch):
+    """What Herdr passes in HERDR_PLUGIN_* must equal what the XDG fallback reconstructs,
+    so `curator` typed in any shell and the scheduled plugin run agree on every path."""
+    from curator import config, paths
+    tmp = herdr_layout
+    bare = (paths.get_home(), config.config_path(), paths.skills_dir(), paths.plugin_state_dir())
+    monkeypatch.setenv("HERDR_PLUGIN_STATE_DIR", str(tmp / "xdg-state" / "herdr" / "plugins" / "curator"))
+    monkeypatch.setenv("HERDR_PLUGIN_CONFIG_DIR", str(tmp / "xdg-config" / "herdr" / "plugins" / "config" / "curator"))
+    config.clear_cache()
+    assert (paths.get_home(), config.config_path(), paths.skills_dir(), paths.plugin_state_dir()) == bare
+    assert paths.plugin_state_dir() == paths.get_home()
+
+
+def test_plugin_config_is_read_without_herdr_layout(herdr_layout):
+    """The plugin's config.json governs a bare `curator` too (prune_builtins etc. must not silently flip)."""
+    import json
+    from curator import config, paths
+    cfg_dir = herdr_layout / "xdg-config" / "herdr" / "plugins" / "config" / "curator"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.json").write_text(json.dumps({"skills": {"dir": "~/work/skills"}, "curator": {"prune_builtins": False}}))
+    config.clear_cache()
+    assert config.load_config_readonly()["curator"]["prune_builtins"] is False
+    assert paths.skills_dir() == herdr_layout / "work" / "skills"
+
+
+def test_derived_paths_layout(home):
+    """Sidecars live INSIDE skills/ but blobs + logs under HOME. Preserve that split."""
     from curator import paths
     assert paths.usage_file() == home / "skills" / ".usage.json"
     assert paths.archive_dir() == home / "skills" / ".archive"
@@ -53,7 +97,7 @@ def test_derived_paths_match_hermes_layout(home):
     assert paths.cron_jobs_file() == home / "cron" / "jobs.json"
 
 
-def test_config_defaults_match_hermes(home):
+def test_config_defaults(home):
     from curator import config
     cfg = config.load_config()
     cur = cfg["curator"]
@@ -132,5 +176,5 @@ def test_expand_path_handles_tilde_env_and_home_relative(home, monkeypatch, tmp_
     monkeypatch.setenv("CURATOR_TEST_DIR", str(tmp_path / "envdir"))
     assert paths.expand_path("~/x") == tmp_path / "x"
     assert paths.expand_path("${CURATOR_TEST_DIR}/y") == tmp_path / "envdir" / "y"
-    # relative entries are resolved relative to HOME (Hermes: relative to HERMES_HOME)
+    # relative entries are resolved relative to HOME
     assert paths.expand_path("rel/z") == home / "rel" / "z"

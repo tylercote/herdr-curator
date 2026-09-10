@@ -38,7 +38,7 @@ def test_initialize_and_tools_list(home, tmp_path):
     assert err["result"]["isError"] is True and "Unknown tool" in err["result"]["content"][0]["text"]
 
 
-def test_tools_call_logs_every_call_hermes_shaped(home, tmp_path):
+def test_tools_call_logs_every_call(home, tmp_path):
     write_skill(home / "skills", "a")
     server = _server(tmp_path)
     _, listed = _call(server, "skills_list", {})
@@ -50,7 +50,7 @@ def test_tools_call_logs_every_call_hermes_shaped(home, tmp_path):
     assert json.loads(rows[1]["arguments"]) == {"name": "a"}
 
 
-def test_skill_view_bumps_telemetry_like_hermes_registration(home, tmp_path):
+def test_skill_view_bumps_telemetry(home, tmp_path):
     from curator import skill_usage
     write_skill(home / "skills", "a")
     _call(_server(tmp_path), "skill_view", {"name": "a"})

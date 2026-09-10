@@ -1,6 +1,6 @@
 """curator.herdr — the Herdr host layer (context, notifications, panes, tick/daemon) and the
-manifest that wires it into Herdr. Hermes has two trigger points (CLI session start + a 60 s
-gateway tick); here they are the ``[[startup]]`` hook and the detached ``curator daemon``."""
+manifest that wires it into Herdr. The two trigger points are the ``[[startup]]`` hook and the
+detached ``curator daemon``."""
 
 from __future__ import annotations
 
@@ -249,7 +249,7 @@ def test_manifest_shape_and_entrypoints_exist():
     assert m["startup"][0]["command"][2].endswith("startup")
     handlers = {h["id"]: h for h in m["link_handlers"]}
     assert handlers["report-link"]["action"] == "report-link"
-    assert re.match(handlers["report-link"]["pattern"], "file:///Users/x/.hermes/logs/curator/20260101-000000/REPORT.md")
+    assert re.match(handlers["report-link"]["pattern"], "file:///Users/x/.local/state/herdr/plugins/curator/logs/curator/20260101-000000/REPORT.md")
     assert not re.match(handlers["report-link"]["pattern"], "https://example.com/REPORT.md")
 
 

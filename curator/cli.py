@@ -1,9 +1,4 @@
-"""CLI: ``curator <subcommand>`` (port of ``hermes_cli/curator.py``).
-
-Every verb Hermes exposes under ``hermes curator`` is here with the same
-flags, output and exit codes; only the program name in hints changes
-(``curator unpin x`` instead of ``hermes curator unpin x``).
-"""
+"""CLI: ``curator <subcommand>``."""
 
 from __future__ import annotations
 

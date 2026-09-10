@@ -1,7 +1,6 @@
-"""The consolidation fork (re-homing of ``agent/curator._run_llm_review``).
+"""The consolidation fork.
 
-Hermes forks its in-process ``AIAgent`` with ``enabled_toolsets=["skills"]`` —
-the fork can ONLY call ``skills_list`` / ``skill_view`` / ``skill_manage``, so
+The fork can ONLY call ``skills_list`` / ``skill_view`` / ``skill_manage``, so
 every mutation is ledgered and there is no shell to bypass the ledger with.
 
 Herdr has no agent runtime of its own, so the same contract is reproduced with
@@ -14,7 +13,7 @@ a headless coding agent + an MCP server:
 
 ``auxiliary.curator.provider`` picks the runner (``claude`` | ``opencode`` |
 ``command`` | ``auto`` = first found on PATH); ``auxiliary.curator.model`` is
-passed through. The result has exactly the Hermes ``llm_meta`` shape:
+passed through. The result is an ``llm_meta`` dict:
 ``final`` / ``summary`` (240-char cap) / ``model`` / ``provider`` / ``tool_calls``
 / ``error``, and ``tool_calls`` comes from the server's JSONL log rather than a
 transcript scrape — so the classifier in ``curator`` works unchanged.
@@ -41,8 +40,8 @@ MCP_SERVER_NAME = "curator"
 TOOL_NAMES = ("skills_list", "skill_view", "skill_manage")
 RUNNER_KINDS = ("claude", "opencode", "command")
 _AUTO_ORDER = ("claude", "opencode")
-_PASSTHROUGH_ENV = ("CURATOR_HOME", "HERMES_HOME", "CURATOR_SKILLS_DIR", "CURATOR_CONFIG", "HERDR_PLUGIN_CONFIG_DIR",
-                    "CURATOR_PROG")
+_PASSTHROUGH_ENV = ("CURATOR_HOME", "CURATOR_SKILLS_DIR", "CURATOR_CONFIG", "HERDR_PLUGIN_CONFIG_DIR",
+                    "HERDR_PLUGIN_STATE_DIR", "CURATOR_PROG")
 
 
 class RunnerUnavailable(RuntimeError):
@@ -93,7 +92,12 @@ def build_mcp_config(*, run_dir: Path, dry_run: bool) -> Dict[str, Any]:
     if dry_run:
         args.append("--dry-run")
     env = {k: v for k, v in ((k, os.environ.get(k)) for k in _PASSTHROUGH_ENV) if v}
+    # The parent has already resolved every path; pin them so the child cannot re-derive
+    # them differently (an explicit CURATOR_HOME alone would re-point skills under it).
+    from curator.config import config_path
     env.setdefault("CURATOR_HOME", str(paths.get_home()))
+    env.setdefault("CURATOR_SKILLS_DIR", str(paths.skills_dir()))
+    env.setdefault("CURATOR_CONFIG", str(config_path()))
     return {"mcpServers": {MCP_SERVER_NAME: {"command": sys.executable, "args": args, "env": env}}}
 
 
@@ -190,7 +194,7 @@ def agent_error_detail(kind: str, stdout: str) -> str:
 
 
 def read_tool_calls(run_dir: Path) -> List[Dict[str, Any]]:
-    """``[{name, arguments}]`` from the server's JSONL log; arguments capped at 400 chars (as Hermes does)."""
+    """``[{name, arguments}]`` from the server's JSONL log; arguments capped at 400 chars."""
     path = Path(run_dir) / "tool_calls.jsonl"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()

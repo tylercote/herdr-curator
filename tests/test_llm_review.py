@@ -1,7 +1,6 @@
 """curator.llm_review — the consolidation fork re-homed onto headless coding agents.
 
-Hermes forks its own ``AIAgent`` with ``enabled_toolsets=["skills"]``. Here the
-same prompt goes to ``claude -p`` / ``opencode run`` (or any argv template) whose
+The prompt goes to ``claude -p`` / ``opencode run`` (or any argv template) whose
 ONLY tools are the three skills tools served by ``curator mcp-serve``. These
 tests never spawn a real agent — ``spawn`` is injected.
 """
@@ -116,6 +115,7 @@ def test_mcp_config_points_at_this_checkout_and_propagates_home(home, tmp_path, 
     assert Path(server["args"][0]).name == "curator" and "mcp-serve" in server["args"] and "--dry-run" in server["args"]
     assert server["args"][server["args"].index("--run-dir") + 1] == str(tmp_path)
     assert server["env"]["CURATOR_HOME"] == str(home) and server["env"]["CURATOR_SKILLS_DIR"] == str(home / "skills")
+    assert server["env"]["CURATOR_CONFIG"] == str(home / "config.json")  # pinned: the child never re-derives paths
 
 
 # --- output parsing ----------------------------------------------------------
@@ -151,7 +151,7 @@ def test_read_tool_calls_truncates_arguments(home, tmp_path):
 
 # --- run_review end to end with a fake spawn ---------------------------------
 
-def test_run_review_happy_path_returns_hermes_shaped_meta(home, set_config):
+def test_run_review_happy_path_returns_llm_meta(home, set_config):
     from curator import llm_review
     set_config({"auxiliary": {"curator": {"provider": "claude", "model": "claude-sonnet-5", "timeout": 42}}})
     final = "Consolidated a into b.\n\n## Structured summary (required)\n```yaml\nconsolidations: []\nprunings: []\n```"

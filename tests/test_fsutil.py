@@ -1,4 +1,4 @@
-"""curator.fsutil — atomic writes (port of the two ``utils`` helpers Hermes uses)."""
+"""curator.fsutil — atomic writes."""
 
 from __future__ import annotations
 

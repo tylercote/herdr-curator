@@ -1,4 +1,4 @@
-"""curator.notices — first-run / recent-run notices (port of hermes_cli.update_cmd_maint curator bits)."""
+"""curator.notices — first-run / recent-run notices."""
 
 from __future__ import annotations
 
