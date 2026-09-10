@@ -8,7 +8,9 @@
     curator tick [--idle S|inf]    one scheduler observation
     curator action <id>            Herdr [[actions]] dispatch
     curator pane <id>              Herdr [[panes]] entrypoints
-    curator bump view|use|patch N  telemetry hooks for other agents (see README)
+    curator bump view|use|patch N  record telemetry for a skill by hand
+    curator hooks install|uninstall|status|sync|launcher [host..]   telemetry hooks in claude / codex / opencode / pi
+    curator hook <host>            receiver the host shims pipe tool calls into (stdin JSON)
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from __future__ import annotations
 import sys
 from typing import List, Optional
 
-_EXTRA = ("skills", "mcp-serve", "startup", "daemon", "tick", "action", "pane", "bump")
+_EXTRA = ("skills", "mcp-serve", "startup", "daemon", "tick", "action", "pane", "bump", "hooks", "hook")
 
 
 def _usage() -> str:
@@ -38,6 +40,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if verb == "skills":
         from curator.skills_tui import cli_main as skills_main
         return skills_main(rest)
+    if verb == "hooks":
+        from curator.integrations import hooks_main
+        return hooks_main(rest)
+    if verb == "hook":
+        from curator.integrations import HOSTS, hook_main
+        return hook_main(rest[0] if rest and rest[0] in HOSTS else "unknown")
     if verb in ("startup", "daemon", "tick", "action", "pane", "bump"):
         return _plugin_verb(verb, rest)
     from curator.cli import cli_main

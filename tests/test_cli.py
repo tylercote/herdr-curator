@@ -43,8 +43,8 @@ def test_all_subcommands_registered(home):
     assert args.func is cli._cmd_adopt and args.all_unmanaged is True and args.dry_run is True and args.skill == []
     named = parser.parse_args(["adopt", "alpha", "beta"])
     assert named.skill == ["alpha", "beta"] and named.all_unmanaged is False
-    args = parser.parse_args(["usage", "--sort", "recent", "--provenance", "hub", "--json"])
-    assert args.func is cli._cmd_usage and args.sort == "recent" and args.provenance == "hub" and args.json is True
+    args = parser.parse_args(["usage", "--sort", "recent", "--owner", "external", "--json"])
+    assert args.func is cli._cmd_usage and args.sort == "recent" and args.owner == "external" and args.json is True
     args = parser.parse_args(["run", "--dry-run", "--consolidate", "--background"])
     assert args.dry_run and args.consolidate and args.background
     args = parser.parse_args(["rollback", "abc123", "-y"])
@@ -176,29 +176,20 @@ def test_unpin_unmanaged_says_it_was_never_managed(home, monkeypatch, capsys):
     assert "unmanaged" in out and "never under auto-transitions" in out
 
 
-def test_pin_still_refuses_bundled_skills(home, monkeypatch, capsys):
+def test_pin_refuses_external_only_skills(home, monkeypatch, capsys):
     from curator import cli, skill_usage
     calls = _stub_pin(monkeypatch, managed=True)
     monkeypatch.setattr(skill_usage, "is_agent_created", lambda name: False)
-    assert cli._cmd_pin(_ns(skill="bundled-skill")) == 1
+    assert cli._cmd_pin(_ns(skill="ext-skill")) == 1
     assert calls == [] and "cannot pin" in capsys.readouterr().out
-
-
-def test_cli_pin_refuses_bundled_skill_end_to_end(home, capsys):
-    from curator import cli
-    skills = home / "skills"
-    write_skill(skills, "ship-skill")
-    (skills / ".bundled_manifest").write_text("ship-skill:abc\n", encoding="utf-8")
-    assert cli._cmd_pin(_ns(skill="ship-skill")) == 1
-    assert "bundled" in capsys.readouterr().out.lower()
 
 
 def test_pin_fails_loudly_when_write_does_not_land(home, monkeypatch):
     from curator import cli, skill_usage
-    name = "sentinel-protected-skill"
-    monkeypatch.setattr(skill_usage, "PROTECTED_BUILTIN_SKILLS", {name})
+    name = "flaky-skill"
     write_skill(home / "skills", name)
-    assert skill_usage.is_agent_created(name) is True and skill_usage.is_curation_eligible(name) is False
+    monkeypatch.setattr(skill_usage, "set_pinned", lambda _name, _pinned: False)  # the write does not land
+    assert skill_usage.is_agent_created(name) is True
     rc, out = _run(cli._cmd_pin, _ns(skill=name))
     assert rc != 0 and "pin" in out.lower()
     assert not skill_usage.get_record(name).get("pinned")
@@ -261,7 +252,7 @@ def test_status_rankings_and_unmanaged_summary(home):
     for _ in range(3):
         skill_usage.bump_view("busy")
     rc, out = _run(cli._cmd_status, Namespace())
-    assert "curator-managed skills: 2 total  (agent-created=2  bundled=0)" in out
+    assert "curator-managed skills: 2 total" in out
     assert "active     2" in out
     assert "least recently active (top 5)" in out and "most active (top 5)" in out and "least active (top 5)" in out
     assert "unmanaged (no provenance marker): 1 total" in out
@@ -357,33 +348,33 @@ def test_pause_resume(home, capsys):
 # --- usage -------------------------------------------------------------------
 
 def _fake_rows():
-    return [{"name": "agent-skill", "provenance": "agent", "state": "active", "use_count": 2, "view_count": 1, "patch_count": 0,
+    return [{"name": "agent-skill", "owner": "managed", "state": "active", "use_count": 2, "view_count": 1, "patch_count": 0,
              "activity_count": 3, "last_activity_at": "2026-05-01T10:00:00+00:00", "created_at": "2026-01-01T00:00:00+00:00", "_persisted": True},
-            {"name": "bundled-skill", "provenance": "bundled", "state": "active", "use_count": 9, "view_count": 4, "patch_count": 0,
+            {"name": "busy-skill", "owner": "user", "state": "active", "use_count": 9, "view_count": 4, "patch_count": 0,
              "activity_count": 13, "last_activity_at": "2026-05-10T10:00:00+00:00", "created_at": "2026-01-01T00:00:00+00:00", "_persisted": True},
-            {"name": "hub-skill", "provenance": "hub", "state": "active", "use_count": 0, "view_count": 0, "patch_count": 0,
+            {"name": "ext-skill", "owner": "external", "state": "active", "use_count": 0, "view_count": 0, "patch_count": 0,
              "activity_count": 0, "last_activity_at": None, "created_at": "2026-01-01T00:00:00+00:00", "_persisted": False}]
 
 
-def test_usage_lists_all_provenances_and_sorts(home, monkeypatch, capsys):
+def test_usage_lists_all_owners_and_sorts(home, monkeypatch, capsys):
     from curator import cli, skill_usage
     monkeypatch.setattr(skill_usage, "usage_report", _fake_rows)
-    assert cli._cmd_usage(_ns(sort="activity", provenance=None, json=False)) == 0
+    assert cli._cmd_usage(_ns(sort="activity", owner=None, json=False)) == 0
     out = capsys.readouterr().out
-    assert "agent=1" in out and "bundled=1" in out and "hub=1" in out
-    assert out.index("bundled-skill") < out.index("agent-skill") < out.index("hub-skill")
-    assert cli._cmd_usage(_ns(sort="name", provenance=None, json=False)) == 0
+    assert "managed=1" in out and "user=1" in out and "external=1" in out
+    assert out.index("busy-skill") < out.index("agent-skill") < out.index("ext-skill")
+    assert cli._cmd_usage(_ns(sort="name", owner=None, json=False)) == 0
     out = capsys.readouterr().out
-    assert out.index("agent-skill") < out.index("bundled-skill") < out.index("hub-skill")
-    assert cli._cmd_usage(_ns(sort="recent", provenance="hub", json=True)) == 0
+    assert out.index("agent-skill") < out.index("busy-skill") < out.index("ext-skill")
+    assert cli._cmd_usage(_ns(sort="recent", owner="external", json=True)) == 0
     rows = json.loads(capsys.readouterr().out)
-    assert [r["name"] for r in rows] == ["hub-skill"]
+    assert [r["name"] for r in rows] == ["ext-skill"]
 
 
 def test_usage_empty(home, monkeypatch, capsys):
     from curator import cli, skill_usage
     monkeypatch.setattr(skill_usage, "usage_report", lambda: [])
-    assert cli._cmd_usage(_ns(sort="activity", provenance=None, json=False)) == 0
+    assert cli._cmd_usage(_ns(sort="activity", owner=None, json=False)) == 0
     assert "no skills found" in capsys.readouterr().out
 
 

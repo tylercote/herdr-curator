@@ -301,13 +301,11 @@ def test_rollback_recovers_cleanly_from_a_partial_extract(home, monkeypatch):
     assert "current only" in (skills / "beta" / "SKILL.md").read_text(encoding="utf-8")
 
 
-def test_snapshot_excludes_git_and_curator_backups_and_hub(home):
+def test_snapshot_excludes_git_and_curator_backups(home):
     from curator import curator_backup as cb
     skills = home / "skills"
     (skills / ".git").mkdir()
     (skills / ".git" / "config").write_text("[core]\n", encoding="utf-8")
-    (skills / ".hub").mkdir()
-    (skills / ".hub" / "lock.json").write_text("{}", encoding="utf-8")
     _write_skill(skills, "alpha", body="alpha body")
     nested_git = skills / "alpha" / ".git"
     nested_git.mkdir()
@@ -317,7 +315,7 @@ def test_snapshot_excludes_git_and_curator_backups_and_hub(home):
         members = tf.getnames()
     for name in members:
         parts = Path(name).parts
-        assert ".git" not in parts and ".curator_backups" not in parts and ".hub" not in parts
+        assert ".git" not in parts and ".curator_backups" not in parts
     assert "alpha/SKILL.md" in members
 
 

@@ -8,7 +8,7 @@ into umbrellas — every step reversible.
 
 - **usage telemetry** for every `SKILL.md` (`view` / `use` / `patch` counters in a `.usage.json` sidecar)
 - **lifecycle** `active → stale (30d) → archived (90d)` for curator-managed skills, never deleting
-- **pin / adopt / restore / archive / prune** — bundled, hub-installed, external and protected skills are off-limits
+- **pin / adopt / restore / archive / prune** — three ownership classes and only one is ever curated: **managed** (the curator created it, or you ran `curator adopt`), **user** (everything else in the tree — never touched), **external** (registered read-only dirs — telemetry only)
 - **whole-tree tar.gz snapshots** before every real run + `rollback`
 - **per-mutation audit ledger** (JSONL + content-addressed blobs) with single-entry `rollback <id>`
 - **opt-in LLM consolidation** that forks a headless coding agent whose *only* tools are `skills_list` / `skill_view` / `skill_manage`, then classifies every removal as consolidated-into-umbrella or pruned and writes `run.json` + `REPORT.md`
@@ -46,6 +46,7 @@ command = "curator.status"
 description = "curator status"
 
 # The rest, if you want single keys for them:
+# command = "curator.setup"        # (re)install telemetry hooks in your agents now
 # command = "curator.run"          # prune-only pass now
 # command = "curator.dry-run"      # preview, mutates nothing
 # command = "curator.consolidate"  # prune + LLM umbrella-building pass
@@ -85,7 +86,7 @@ $EDITOR "$(herdr plugin config-dir curator)/config.json"
 ```json
 {
   "skills": { "dir": "~/work/skills" },
-  "curator": { "consolidate": false, "prune_builtins": true },
+  "curator": { "consolidate": false },
   "auxiliary": { "curator": { "provider": "claude", "model": "claude-sonnet-5", "timeout": 600 } }
 }
 ```
@@ -123,19 +124,70 @@ curator purge [--days N] [--dry-run]
 
 ## Telemetry from your agents
 
-Any agent can report skill events:
+The curator only learns anything if the agent that loads skills tells it. **That wiring is
+automatic**: every Herdr session start reconciles the hooks — for each harness it finds on the
+machine it installs (or refreshes) a hook, and it registers the harness's own skill directory so
+loads of skills living there are counted too. A Herdr notification tells you when it changed
+something. `Curator: setup telemetry hooks` (`curator.setup`) forces the same thing on demand.
 
-```sh
-curator bump use <skill>     # skill loaded into a conversation
-curator bump view <skill>    # skill file viewed
-curator bump patch <skill>   # skill edited
+| host | what gets installed | what it reports |
+|---|---|---|
+| **Claude Code** | a `PostToolUse` hook (`Skill\|Read\|Edit\|Write`) in `~/.claude/settings.json`, merged next to your existing hooks | `Skill` invocations and reads/edits of files inside a skill dir |
+| **Codex** | `PostToolUse` (`Bash\|Edit\|Write\|Read\|apply_patch`) + `UserPromptSubmit` entries in `~/.codex/hooks.json` | `$skill` mentions in your prompt; shell reads of files inside a skill dir (Codex has no read tool — it `cat`s SKILL.md); `apply_patch` edits and shell redirects into a skill dir. **Codex won't run a new hook until you trust it: open Codex and run `/hooks`** (or pass `--dangerously-bypass-hook-trust` to `codex exec` for automation). |
+| **OpenCode** | `~/.config/opencode/plugins/curator.ts` (`tool.execute.before/after`) | the `skill` tool, plus `read`/`edit`/`write` inside a skill dir |
+| **pi** | `~/.pi/agent/extensions/curator.ts` (`tool_execution_start/end`) | `read`/`edit`/`write` inside a skill dir — pi loads a skill by reading its `SKILL.md` |
+
+Every host forwards the raw tool call (or prompt) to `curator hook <host>`, which resolves the
+path or name against the skills the curator actually scans and ignores everything else — so a
+hook can never invent records. Loading a skill (the skill tool, or any read inside its directory)
+counts as **view + use**: loading a skill to act on it *is* use, and the stale timer keys off
+`last_used_at`. An edit or write inside a skill directory counts as a **patch**. The receiver
+always exits 0 and logs each recorded event (and its source tool) to `<state>/hooks.log`; touch
+`<state>/hooks.debug` to also log a summary of every payload a host sends.
+
+**Nothing points at the checkout.** Host configs reference one stable launcher,
+`<state>/bin/curator-hook`, which execs whatever plugin root Herdr last installed and exits 0
+silently if the plugin is gone. So `herdr plugin update` never strands a hook, Codex never asks
+you to re-trust an unchanged command, and uninstalling the plugin never spams your harness with
+errors. Still, run `curator hooks uninstall` before `herdr plugin uninstall` to leave the host
+configs clean.
+
+**Skill directories.** pi and Codex read `~/.agents/skills`; OpenCode and Codex have their own
+too. Reconcile adds the ones that exist to `skills.external_dirs` — telemetry only; external
+skills are never staled, archived or consolidated. A skill you have *linked into* the curated
+tree (`~/.claude/skills/x -> ~/.agents/skills/x`) stays local and manageable: the link is the
+adoption.
+
+Config (plugin `config.json`):
+
+```json
+{ "hooks": { "auto": true, "hosts": [], "register_skill_dirs": true } }
 ```
 
-For Claude Code, a `PostToolUse` hook on the `Skill` tool that runs `curator bump use "$SKILL_NAME"` gives the curator its usage signal. Any agent that speaks MCP can also mount `curator mcp-serve --foreground` and get the full ledgered `skill_manage` surface.
+`auto: false` stops startup from installing anything (it still refreshes the launcher);
+`hosts` restricts auto-install to a subset. The scriptable layer underneath:
+
+```sh
+curator hooks status           # per host, plus launcher + log location
+curator hooks install [host]   # any of claude codex opencode pi; default: all detected
+curator hooks uninstall [host] # no host = all, and removes the launcher
+curator hooks sync             # exactly what session start does
+```
+
+Anything else can report directly with `curator bump use|view|patch <skill>`, and any agent
+that speaks MCP can mount `curator mcp-serve --foreground` for the full ledgered `skill_manage`
+surface.
 
 ## The LLM consolidation pass
 
 Off by default (`curator.consolidate: false`). When on, or with `curator run --consolidate`, the pass spawns `claude -p` (or `opencode run`, or any argv template via `auxiliary.curator.provider = "command"`) with **no built-in tools** and a single MCP server, `curator mcp-serve`, that exposes the skills toolset with the background-review origin bound: ownership, read-before-write and fail-closed-delete guards are enforced in the server, every mutation is ledgered as `actor=curator`, and the tool-call log drives the consolidated-vs-pruned classification in the report.
+
+## Safety
+
+- **Only managed skills are ever modified autonomously.** A skill is managed only when its `.usage.json` record says `created_by: agent`, and exactly two things write that: the LLM pass creating a *new* skill, and you running `curator adopt`. Hooks, ticks and startup never adopt anything.
+- **The LLM pass is fenced at the write layer.** Every `skill_manage` write goes through an ownership guard that refuses pinned, external and non-managed skills regardless of what the model asks; `skills_list` labels every row with its `owner` so the model is told what it may touch; and the pass's own reads count as *views*, not *uses*, so it can never keep a skill artificially alive.
+- **Rollback comes in two sizes.** `curator rollback <ledger-entry-id>` undoes one curator mutation, file by file. `curator rollback --id <snapshot>` restores the **whole tree** — every skill, including ones the curator never managed, back to the moment of that snapshot (a safety snapshot is taken first, so it is itself undoable). Prefer the ledger form; reach for the snapshot form only when you want the entire tree back.
+- `curator mcp-serve --foreground` serves `skill_manage` *without* the curator's ownership guards. It is your own agent's ledgered edit tool, not curation; nothing in the plugin ever runs it.
 
 ## Development
 

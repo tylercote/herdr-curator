@@ -436,24 +436,18 @@ class TestBackgroundOwnershipPolicyConsistency:
         after = _bg_patch(home, "adopt-me", "Do the thing.", "Do the new thing.")
         assert before["success"] is False and after["success"] is True, after
 
-    def test_background_refuses_pinned_bundled_hub_external(self, home, set_config, tmp_path):
+    def test_background_refuses_pinned_and_external(self, home, set_config, tmp_path):
         from curator import skill_usage
         from curator.skill_manager import _create_skill
         skills = home / "skills"
-        for name in ("pinned", "bundled", "hubbed"):
+        for name in ("pinned",):
             _create_skill(name, VALID_SKILL_CONTENT)
             skill_usage.mark_agent_created(name)
         assert skill_usage.set_pinned("pinned", True)
-        (skills / ".bundled_manifest").write_text("bundled:abc\n", encoding="utf-8")
-        hub = skills / ".hub"
-        hub.mkdir()
-        (hub / "lock.json").write_text(json.dumps({"installed": {"hubbed": {}}}), encoding="utf-8")
         ext = tmp_path / "ext"
         write_skill(ext, "ext-skill", body="Step 1: Do the thing.")
         set_config({"skills": {"external_dirs": [str(ext)]}})
         assert "pinned" in _bg_patch(home, "pinned", "Do the thing.", "x")["error"]
-        assert "bundled" in _bg_patch(home, "bundled", "Do the thing.", "x")["error"]
-        assert "hub-installed" in _bg_patch(home, "hubbed", "Do the thing.", "x")["error"]
         r = _bg_patch(home, "ext-skill", "Do the thing.", "x")
         assert r["success"] is False and "external" in r["error"]
 

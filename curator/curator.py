@@ -15,7 +15,7 @@ A run has two phases:
 1. **Automatic transitions** — pure, no LLM: unused > ``stale_after_days``
    -> ``stale``; unused > ``archive_after_days`` -> moved to ``.archive/``.
    Pinned and cron-referenced skills are skipped; never-used skills get a
-   ``stale_after_days`` grace floor; first-sight records are seeded, not judged.
+   ``stale_after_days`` grace floor.
 2. **LLM consolidation** — opt-in (``curator.consolidate``): the review prompt
    plus the candidate list go to a headless coding agent whose ONLY tools are
    ``skills_list`` / ``skill_view`` / ``skill_manage`` (see ``llm_review`` and
@@ -124,10 +124,6 @@ def get_archive_after_days() -> int:
     return _config_number("archive_after_days", DEFAULT_ARCHIVE_AFTER_DAYS, int)
 
 
-def get_prune_builtins() -> bool:
-    return bool(_load_config().get("prune_builtins", True))
-
-
 def get_consolidate() -> bool:
     return bool(_load_config().get("consolidate", DEFAULT_CONSOLIDATE))
 
@@ -190,14 +186,13 @@ def _archive_as_curator(_u, name: str) -> bool:
 
 def apply_automatic_transitions(now: Optional[datetime] = None) -> Dict[str, int]:
     """Move every curator-managed skill between active/stale/archived based on its latest real
-    activity; pinned skills are never touched. First-sight records are seeded so their clock
-    starts NOW, not at epoch."""
+    activity; pinned and cron-referenced skills are never touched."""
     _u = skill_usage
     now = now or datetime.now(timezone.utc)
     stale_cutoff = now - timedelta(days=get_stale_after_days())
     archive_cutoff = now - timedelta(days=get_archive_after_days())
     protected = _cron_referenced_skills()
-    counts = {"marked_stale": 0, "archived": 0, "reactivated": 0, "checked": 0, "seeded": 0}
+    counts = {"marked_stale": 0, "archived": 0, "reactivated": 0, "checked": 0}
 
     def _set(name: str, state: str, key: str) -> None:
         _u.set_state(name, state)
@@ -207,10 +202,6 @@ def apply_automatic_transitions(now: Optional[datetime] = None) -> Dict[str, int
         counts["checked"] += 1
         name = row["name"]
         if row.get("pinned") or name in protected:
-            continue
-        if not row.get("_persisted", True):
-            _u.seed_record_if_missing(name)
-            counts["seeded"] += 1
             continue
         anchor = _parse_iso(row.get("last_activity_at")) or _parse_iso(row.get("created_at")) or now
         if anchor.tzinfo is None:
@@ -279,19 +270,17 @@ CURATOR_REVIEW_PROMPT = (
     "chatter are dropped — the rule must stand without the story. Moving a "
     "file unchanged under references/ is filing, not consolidating.\n\n"
     "Hard rules — do not violate:\n"
-    "1. DO NOT touch bundled, hub-installed, or external-dir skills "
-    "(`skills.external_dirs`). The candidate list below is already filtered "
-    "to local curator-managed skills only; external skills are externally "
-    "owned and read-only to this background curator.\n"
+    "1. ONLY touch skills with owner=managed. skills_list shows an `owner` on "
+    "every row: `managed` skills are the curator's own (it created them, or the "
+    "user adopted them); `user` skills are hand-written and off-limits; "
+    "`external` skills live in read-only directories. The candidate list below "
+    "already contains ONLY managed skills. Never patch, archive, delete or "
+    "absorb a user or external skill, and never create an umbrella whose "
+    "content is copied from one — reading them for context is fine, that is all.\n"
     "2. DO NOT delete any skill. Archiving (moving the skill's directory "
     "into the skills tree's .archive/) is the maximum destructive action. "
     "Archives are recoverable; deletion is not.\n"
     "3. DO NOT touch skills shown as pinned=yes. Skip them entirely.\n"
-    "3b. DO NOT archive, delete, consolidate, move, or otherwise modify any "
-    "skill named in the protected built-ins list (currently: plan). These "
-    "back load-bearing UX (slash-command entry points referenced in docs and "
-    "tips) and are filtered out of the candidate list below — never resurrect "
-    "one as an archive or absorb target.\n"
     "3c. DO NOT archive or prune any skill marked `cron=yes` in the candidate "
     "list. A cron job depends on it and will fail to load it on its next "
     "run. You MAY still consolidate it into an umbrella — but only because "
@@ -431,17 +420,6 @@ CURATOR_REVIEW_PROMPT = (
     "summary of clusters processed, patches made, and decisions left alone."
 )
 
-
-CURATOR_PRUNE_BUILTINS_NOTE = (
-    "\n\nPRUNE-BUILTINS MODE IS ON: bundled built-in skills "
-    "ARE included in the candidate list below and MAY be "
-    "archived for staleness/irrelevance, overriding hard "
-    "rule #1 for bundled skills ONLY. Hub-installed skills "
-    "remain strictly off-limits. Treat a stale built-in the "
-    "same as a stale agent-created skill: archive it (never "
-    "delete). It will be restored on a bundled re-seed only if "
-    "the user explicitly restores it."
-)
 
 # --- Per-run reports — {YYYYMMDD-HHMMSS}/run.json + REPORT.md under logs/curator/ ---
 
@@ -781,7 +759,7 @@ def _render_candidate_list() -> str:
         return "No curator-managed skills to review."
     cron_referenced = _cron_referenced_skills()
     return "\n".join([f"Curator-managed skills ({len(rows)}):\n"] + [
-        f"- {r['name']}  provenance={r.get('provenance', 'agent')}  state={r['state']}  "
+        f"- {r['name']}  state={r['state']}  "
         f"pinned={'yes' if r.get('pinned') else 'no'}  cron={'yes' if r['name'] in cron_referenced else 'no'}  "
         f"activity={r.get('activity_count', 0)}  use={r.get('use_count', 0)}  view={r.get('view_count', 0)}  "
         f"patches={r.get('patch_count', 0)}  last_activity={r.get('last_activity_at') or 'never'}"
@@ -813,7 +791,7 @@ def _consolidation_pass(prefix: str, auto_summary: str, dry_run: bool, before_na
             final_summary = f"{prefix}{auto_summary}; llm: skipped (no candidates)"
             llm_meta = _llm_meta("skipped (no candidates)")
         else:
-            prompt = f"{CURATOR_REVIEW_PROMPT}{CURATOR_PRUNE_BUILTINS_NOTE if get_prune_builtins() else ''}\n\n{candidate_list}"
+            prompt = f"{CURATOR_REVIEW_PROMPT}\n\n{candidate_list}"
             if dry_run:
                 prompt = f"{CURATOR_DRY_RUN_BANNER}\n\n{prompt}"
             llm_meta = _run_llm_review(prompt)

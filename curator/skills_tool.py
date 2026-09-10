@@ -106,7 +106,10 @@ def _truncate_description(description: str) -> str:
 
 def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
     """All skills (name, description, category) across project/local/external dirs, first-wins by name."""
+    from curator import skill_usage
+    from curator.skill_utils import is_external_skill_path
     disabled = set() if skip_disabled else get_disabled_skill_names()
+    usage = skill_usage.load_usage()
     _project_dirs, dirs_to_scan, _ = _skill_search_dirs()
     skills = []
     seen_names: set = set()
@@ -127,6 +130,7 @@ def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
                                        description)
                 seen_names.add(name)
                 skills.append({"name": name, "description": _truncate_description(description or ""),
+                               "owner": skill_usage.owner_of(usage.get(name), external=is_external_skill_path(skill_md)),
                                "category": _get_category_from_path(skill_md)})
             except Exception as e:
                 logger.debug("Skipping skill at %s: failed to parse: %s", skill_md, e, exc_info=True)
@@ -310,17 +314,21 @@ def skill_view(name: str, file_path: Optional[str] = None, task_id: Optional[str
 
 
 def skill_view_with_bump(args: Dict[str, Any], **kw) -> str:
-    """Invoke skill_view, then bump view_count + use on success (best-effort). Viewing is actively
-    loading the skill to act on it — that counts as use (the curator's stale timer keys off last_used_at)."""
+    """Invoke skill_view, then bump telemetry on success (best-effort). An agent viewing a skill is
+    loading it to act on it — that counts as use (the stale timer keys off last_used_at). The curator's
+    own consolidation pass reading a skill is NOT use: under the background-review origin only the
+    view counter moves, so a weekly pass can never keep every managed skill perpetually "active"."""
     name = args.get("name", "")
     result = skill_view(name, file_path=args.get("file_path"), task_id=kw.get("task_id"))
     with suppress(Exception):
         parsed = json.loads(result)
         if isinstance(parsed, dict) and parsed.get("success"):
             if resolved := parsed.get("name") or name:
+                from curator.skill_provenance import is_background_review
                 from curator.skill_usage import bump_use, bump_view
                 bump_view(str(resolved))
-                bump_use(str(resolved), task_id=kw.get("task_id"), session_id=kw.get("session_id"))
+                if not is_background_review():
+                    bump_use(str(resolved), task_id=kw.get("task_id"), session_id=kw.get("session_id"))
     return result
 
 

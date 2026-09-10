@@ -7,7 +7,7 @@ is reached lazily via ``curator.skill_manager`` so test patches keep working.
 The background-review guards are what make the LLM consolidation pass safe:
 
 * ownership — the fork may only touch curator-managed sediment (never pinned,
-  external, bundled, hub, protected or user-owned skills);
+  external or user-owned skills);
 * read-before-write — a mutation must be preceded by ``skill_view`` of the
   SAME file in the same review (marks are per-review, shared across copied
   tool contexts);
@@ -172,11 +172,6 @@ def _background_review_write_guard(name: str, skill_dir: Path, action: str) -> O
         logger.debug("external skill guard lookup failed for %s", name, exc_info=True)
     try:
         from curator import skill_usage
-        for predicate, label in ((skill_usage.is_protected_builtin, "protected built-in"),
-                                 (skill_usage.is_hub_installed, "hub-installed"),
-                                 (skill_usage.is_bundled, "bundled")):
-            if predicate(name):
-                return _refusal(f"{refuse} {label} skill '{name}'.")
         usage_rec = skill_usage.load_usage().get(name)
         if not skill_usage._is_curator_managed_record(usage_rec):
             _detail = (f"created_by={usage_rec.get('created_by')!r}" if isinstance(usage_rec, dict) else "no usage record")

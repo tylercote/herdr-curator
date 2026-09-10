@@ -55,7 +55,7 @@ def test_skill_view_bumps_telemetry(home, tmp_path):
     write_skill(home / "skills", "a")
     _call(_server(tmp_path), "skill_view", {"name": "a"})
     rec = skill_usage.get_record("a")
-    assert rec["view_count"] == 1 and rec["use_count"] == 1
+    assert rec["view_count"] == 1 and rec["use_count"] == 0  # the pass's own reading is a view, never a use
 
 
 def test_skill_manage_flat_and_operations_shapes(home, tmp_path):

@@ -3,8 +3,7 @@
 Before any mutating curator pass, ``<skills>/`` is tar.gz'd under
 ``<skills>/.curator_backups/<utc-iso>/`` with a ``manifest.json``. Rollback
 first snapshots the CURRENT tree (so it is itself undoable), then extracts the
-chosen snapshot into place. Excluded: ``.curator_backups/``, ``.hub/``,
-``.git/``. Each snapshot also copies ``<home>/cron/jobs.json`` as
+chosen snapshot into place. Excluded: ``.curator_backups/`` and ``.git/``. Each snapshot also copies ``<home>/cron/jobs.json`` as
 ``cron-jobs.json`` so rollback can restore cron ``skills``/``skill`` fields.
 """
 
@@ -30,7 +29,7 @@ from curator.skill_utils import is_excluded_skill_path, rglob_following_symlinks
 logger = logging.getLogger(__name__)
 
 DEFAULT_KEEP = 5
-_EXCLUDE_TOP_LEVEL = {".curator_backups", ".hub", ".git"}
+_EXCLUDE_TOP_LEVEL = {".curator_backups", ".git"}
 _ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(-\d{2})?$")
 CRON_JOBS_FILENAME = "cron-jobs.json"
 _ARCHIVE_NAME = "skills.tar.gz"

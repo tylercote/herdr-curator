@@ -13,7 +13,6 @@
     "stale_after_days": 30,
     "archive_after_days": 90,
     "consolidate": false,
-    "prune_builtins": true,
     "archive_ttl_days": 0,
     "backup": { "enabled": true, "keep": 5 }
   },

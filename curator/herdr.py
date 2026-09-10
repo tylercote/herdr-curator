@@ -163,13 +163,19 @@ def tick(*, idle_for_seconds: Optional[float] = "measure") -> Optional[Dict[str,
 
 
 def startup(*, spawn_daemon: bool = True) -> int:
-    from curator import notices
+    from curator import integrations, notices
     first = notices.first_run_notice_text()
     if first:
         notify(NOTIFY_TITLE, body="\n".join(first))
     recent = notices.recent_run_notice_text(mark_shown=True)
     if recent:
         notify(NOTIFY_TITLE, body="\n".join(recent))
+    try:  # launcher + host hooks + skill dirs; never blocks the session
+        changed = integrations.reconcile_notice(integrations.reconcile())
+    except Exception as e:
+        changed = [f"hook setup failed: {e}"]
+    if changed:
+        notify(NOTIFY_TITLE, body="\n".join(changed))
     tick(idle_for_seconds=float("inf"))  # session start == fully idle
     if spawn_daemon:
         _spawn_detached(["daemon"])
@@ -252,6 +258,7 @@ ACTIONS: Dict[str, Callable[[], int]] = {
     "consolidate": _act_open("run", "split", CURATOR_RUN_ARGS="--consolidate"),
     "report": _act_open("report", "overlay"),
     "console": _act_open("console", "overlay"),
+    "setup": _act_open("setup", "overlay"),
     "report-link": _act_report_link,
 }
 
@@ -309,6 +316,8 @@ _CONSOLE_MENU = [
     ("4", "run --dry-run", ["run", "--dry-run"]), ("5", "run --consolidate", ["run", "--consolidate"]),
     ("6", "list-unmanaged", ["list-unmanaged"]), ("7", "list-archived", ["list-archived"]),
     ("8", "ledger", ["ledger"]), ("9", "rollback --list", ["rollback", "--list"]),
+    ("h", "hooks status (claude / codex / opencode / pi telemetry)", ["hooks", "status"]),
+    ("H", "hooks install", ["hooks", "install"]),
 ]
 
 
@@ -330,9 +339,23 @@ def _pane_console() -> int:
                 from curator.skills_tui import cli_main as skills_main
                 skills_main(argv[1:])
                 continue
+            if argv[:1] == ["hooks"]:
+                from curator.integrations import hooks_main
+                hooks_main(argv[1:])
+                continue
             cli.cli_main(argv)
         except SystemExit as e:
             print(f"curator: exited {e.code}")
+
+
+def _pane_setup() -> int:
+    """Install telemetry hooks for every detected host now, then show status."""
+    from curator.integrations import hooks_main
+    rc = hooks_main(["install"])
+    print()
+    hooks_main(["status"])
+    _wait_for_key()
+    return rc
 
 
 def _pane_skills() -> int:
@@ -341,7 +364,7 @@ def _pane_skills() -> int:
 
 
 PANES: Dict[str, Callable[[], int]] = {"skills": _pane_skills, "status": _pane_status, "run": _pane_run,
-                                       "report": _pane_report, "console": _pane_console}
+                                       "report": _pane_report, "console": _pane_console, "setup": _pane_setup}
 
 
 def pane(entrypoint: str) -> int:

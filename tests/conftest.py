@@ -29,12 +29,7 @@ def write_skill(skills_dir: Path, name: str, category: str = "", body: str = "# 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    """Isolated, self-contained curator home with an empty ``skills/``.
-
-    Pins ``curator.prune_builtins`` OFF via config so bundled-protection tests
-    exercise the off-path regardless of the shipped default; tests flip it
-    with ``set_config``.
-    """
+    """Isolated, self-contained curator home with an empty ``skills/`` and an empty ``config.json``."""
     h = tmp_path / "curator-home"
     (h / "skills").mkdir(parents=True)
     monkeypatch.setenv("CURATOR_HOME", str(h))
@@ -45,7 +40,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     from curator import config as _config
     _config.clear_cache()
-    (h / "config.json").write_text(json.dumps({"curator": {"prune_builtins": False}}), encoding="utf-8")
+    (h / "config.json").write_text("{}", encoding="utf-8")
     _config.clear_cache()
     yield h
     _config.clear_cache()

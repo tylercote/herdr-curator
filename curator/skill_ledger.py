@@ -31,7 +31,7 @@ _BACKUP_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(-\d{2})?$")
 _ARCHIVE_TS_SUFFIX_RE = re.compile(r"^(.+)-\d{14}$")
 _PACKAGE_RESTORE_ACTIONS = frozenset({"delete", "archive", "purge"})
 _VALID_ACTORS = {"curator", "agent", "user"}
-_NON_PACKAGE_TOPS = {".curator_backups", ".hub", ".archive"}
+_NON_PACKAGE_TOPS = {".curator_backups", ".archive"}
 
 ACTOR_AGENT, ACTOR_CURATOR, ACTOR_USER = "agent", "curator", "user"
 

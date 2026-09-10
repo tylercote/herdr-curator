@@ -27,9 +27,6 @@ and the ledger blob store must survive a tree rollback):
     <skills>/.curator_state              scheduler state
     <skills>/.curator_backups/<id>/      whole-tree tar.gz snapshots
     <skills>/.curator_ledger.jsonl       per-mutation audit ledger
-    <skills>/.bundled_manifest           "name:hash" lines — bundled built-ins
-    <skills>/.hub/lock.json              hub-installed skills
-    <skills>/.curator_suppressed         pruned built-ins the re-seeder must skip
     <home>/.curator_backups/blobs/       content-addressed ledger blobs
     <home>/logs/curator/<stamp>/         per-run run.json + REPORT.md
     <home>/cron/jobs.json                scheduled jobs (skill refs are protected)

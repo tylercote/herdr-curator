@@ -45,7 +45,7 @@ def test_parse_frontmatter_malformed_falls_back_to_key_value_split():
 
 def test_is_excluded_skill_path_and_support_dirs(tmp_path):
     from curator.skill_utils import is_excluded_skill_path, EXCLUDED_SKILL_DIRS
-    for d in (".git", ".hub", ".archive", ".curator_backups", "node_modules", "__pycache__"):
+    for d in (".git", ".archive", ".curator_backups", "node_modules", "__pycache__"):
         assert d in EXCLUDED_SKILL_DIRS
         assert is_excluded_skill_path(tmp_path / d / "x" / "SKILL.md")
     root = tmp_path / "skills"

@@ -129,19 +129,6 @@ def test_skill_event_is_not_emitted_when_usage_state_cannot_commit(home, monkeyp
     assert events == []
 
 
-def test_installed_lifecycle_uses_persisted_provenance_when_hub_lookup_misses(home, monkeypatch):
-    from curator import lifecycle, skill_usage
-    events = []
-    monkeypatch.setattr(lifecycle, "has_hook", lambda name: True)
-    monkeypatch.setattr(lifecycle, "invoke_hook", lambda name, **kwargs: events.append(kwargs))
-    monkeypatch.setattr(skill_usage, "is_hub_installed", lambda _n: False)
-    monkeypatch.setattr(skill_usage, "is_bundled", lambda _n: False)
-    skill_usage.record_installed("private-installed-skill")
-    assert len(events) == 1
-    assert events[0]["action"] == "installed"
-    assert events[0]["provenance"] == "installed"
-
-
 def test_created_skill_does_not_inherit_stale_identity_or_continuity(home, monkeypatch):
     from curator import lifecycle, skill_usage
     events = []
@@ -258,77 +245,23 @@ def test_latest_activity_at_and_activity_count(home):
 # Provenance filter — the load-bearing safety check
 # ---------------------------------------------------------------------------
 
-def test_agent_created_excludes_bundled(home):
+def test_agent_created_excludes_unadopted_skills(home):
     from curator.skill_usage import list_agent_created_skill_names, mark_agent_created
     skills_dir = home / "skills"
-    write_skill(skills_dir, "bundled-skill", category="github")
+    write_skill(skills_dir, "hand-written", category="github")
     write_skill(skills_dir, "my-skill")
     mark_agent_created("my-skill")
-    (skills_dir / ".bundled_manifest").write_text("bundled-skill:abc123\n", encoding="utf-8")
     names = list_agent_created_skill_names()
     assert "my-skill" in names
-    assert "bundled-skill" not in names
+    assert "hand-written" not in names
 
 
-def test_is_agent_created(home):
+def test_is_agent_created(home, tmp_path, set_config):
     from curator.skill_usage import is_agent_created
-    skills_dir = home / "skills"
-    (skills_dir / ".bundled_manifest").write_text("bundled:abc\n", encoding="utf-8")
-    hub_dir = skills_dir / ".hub"
-    hub_dir.mkdir()
-    (hub_dir / "lock.json").write_text(json.dumps({"installed": {"hubbed": {}}}), encoding="utf-8")
+    write_skill(tmp_path / "ext", "ext-only")
+    set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
     assert is_agent_created("my-skill") is True
-    assert is_agent_created("bundled") is False
-    assert is_agent_created("hubbed") is False
-
-
-def test_hub_lock_install_path_frontmatter_name_counts_as_hub(home):
-    from curator.skill_usage import is_hub_installed
-    skills_dir = home / "skills"
-    d = write_skill(skills_dir, "renamed-dir")
-    (d / "SKILL.md").write_text("---\nname: fm-name\ndescription: x\n---\n", encoding="utf-8")
-    hub = skills_dir / ".hub"
-    hub.mkdir()
-    (hub / "lock.json").write_text(json.dumps({"installed": {"lockkey": {"install_path": "renamed-dir"}}}),
-                                   encoding="utf-8")
-    assert is_hub_installed("lockkey")
-    assert is_hub_installed("fm-name")
-    assert not is_hub_installed("renamed-dir")
-
-
-def test_hub_lock_rejects_install_path_escaping_skills_dir(home, tmp_path):
-    from curator.skill_usage import _read_hub_installed_names
-    skills_dir = home / "skills"
-    write_skill(tmp_path, "escapee")
-    hub = skills_dir / ".hub"
-    hub.mkdir()
-    (hub / "lock.json").write_text(json.dumps({"installed": {"k": {"install_path": "../../escapee"}}}),
-                                   encoding="utf-8")
-    assert _read_hub_installed_names() == {"k"}
-
-
-def test_prune_builtins_makes_bundled_eligible_and_managed(home, set_config):
-    from curator import skill_usage as u
-    skills_dir = home / "skills"
-    write_skill(skills_dir, "ship")
-    (skills_dir / ".bundled_manifest").write_text("ship:abc\n", encoding="utf-8")
-    assert u.is_curation_eligible("ship") is False
-    assert "ship" not in u.list_agent_created_skill_names()
-    set_config({"curator": {"prune_builtins": True}})
-    assert u.is_curation_eligible("ship") is True
-    assert "ship" in u.list_agent_created_skill_names()
-    assert u.provenance("ship") == "bundled"
-
-
-def test_protected_builtin_never_eligible(home, monkeypatch, set_config):
-    from curator import skill_usage as u
-    monkeypatch.setattr(u, "PROTECTED_BUILTIN_SKILLS", {"sentinel"})
-    write_skill(home / "skills", "sentinel")
-    set_config({"curator": {"prune_builtins": True}})
-    assert u.is_protected_builtin("sentinel")
-    assert u.is_curation_eligible("sentinel") is False
-    assert "sentinel" not in u.list_agent_created_skill_names()
-    assert u.is_agent_created("sentinel") is True  # the two gates genuinely disagree
+    assert is_agent_created("ext-only") is False
 
 
 def test_external_dir_skill_is_never_eligible(home, set_config, tmp_path):
@@ -344,16 +277,17 @@ def test_external_dir_skill_is_never_eligible(home, set_config, tmp_path):
     assert ok is False and "external" in msg
 
 
-def test_seed_record_if_missing_only_for_eligible_and_only_once(home):
+def test_seed_record_if_missing_only_for_eligible_and_only_once(home, tmp_path, set_config):
     from curator import skill_usage as u
     write_skill(home / "skills", "fresh")
     u.seed_record_if_missing("fresh")
     first = u.load_usage()["fresh"]
     u.seed_record_if_missing("fresh")
     assert u.load_usage()["fresh"] == first
-    (home / "skills" / ".bundled_manifest").write_text("other-bundled:abc\n", encoding="utf-8")
-    u.seed_record_if_missing("other-bundled")  # bundled + prune_builtins off -> not eligible
-    assert "other-bundled" not in u.load_usage()
+    write_skill(tmp_path / "ext", "shared")
+    set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
+    u.seed_record_if_missing("shared")  # external -> not eligible
+    assert "shared" not in u.load_usage()
 
 
 # ---------------------------------------------------------------------------
@@ -418,44 +352,15 @@ def test_restore_refuses_when_destination_exists_or_missing_archive(home):
     assert ok is False and "not found in archive" in msg
 
 
-def test_restore_refuses_shadowing_hub_or_bundled(home, set_config):
+def test_restore_archived_skill(home):
     from curator import skill_usage as u
-    skills_dir = home / "skills"
-    write_skill(skills_dir / ".archive", "h")
-    write_skill(skills_dir / ".archive", "b")
-    hub = skills_dir / ".hub"
-    hub.mkdir()
-    (hub / "lock.json").write_text(json.dumps({"installed": {"h": {}}}), encoding="utf-8")
-    (skills_dir / ".bundled_manifest").write_text("b:abc\n", encoding="utf-8")
-    assert u.restore_skill("h")[0] is False
-    assert u.restore_skill("b")[0] is False  # prune_builtins off in fixture
-    set_config({"curator": {"prune_builtins": True}})
+    write_skill(home / "skills" / ".archive", "b")
     assert u.restore_skill("b")[0] is True
+    assert (home / "skills" / "b" / "SKILL.md").exists()
 
 
-def test_archived_builtin_is_suppressed_and_restore_lifts_it(home, set_config):
+def test_archive_refusal_messages(home):
     from curator import skill_usage as u
-    skills_dir = home / "skills"
-    write_skill(skills_dir, "ship")
-    (skills_dir / ".bundled_manifest").write_text("ship:abc\n", encoding="utf-8")
-    set_config({"curator": {"prune_builtins": True}})
-    assert u.archive_skill("ship")[0]
-    assert u.read_suppressed_names() == {"ship"}
-    assert u.restore_skill("ship")[0]
-    assert u.read_suppressed_names() == set()
-
-
-def test_archive_refusal_messages(home, monkeypatch):
-    from curator import skill_usage as u
-    skills_dir = home / "skills"
-    write_skill(skills_dir, "b")
-    (skills_dir / ".bundled_manifest").write_text("b:abc\n", encoding="utf-8")
-    ok, msg = u.archive_skill("b")
-    assert not ok and "bundled built-in" in msg and "prune_builtins" in msg
-    monkeypatch.setattr(u, "PROTECTED_BUILTIN_SKILLS", {"p"})
-    write_skill(skills_dir, "p")
-    ok, msg = u.archive_skill("p")
-    assert not ok and "protected built-in" in msg
     ok, msg = u.archive_skill("absent")
     assert not ok and "not found" in msg
 
@@ -473,7 +378,7 @@ def test_curated_report_rows_and_persisted_flag(home):
     rows = {r["name"]: r for r in u.curated_report()}
     assert set(rows) == {"managed"}
     assert rows["managed"]["_persisted"] is True
-    assert rows["managed"]["provenance"] == "agent"
+    assert rows["managed"]["owner"] == "managed"
     assert "last_activity_at" in rows["managed"] and "activity_count" in rows["managed"]
 
 
@@ -487,31 +392,29 @@ def test_curated_report_includes_pinned_unmanaged_but_not_ghosts(home):
     assert names == ["legacy"]
 
 
-def test_usage_report_covers_all_provenances(home):
+def test_usage_report_covers_all_owners_including_external(home, tmp_path, set_config):
     from curator import skill_usage as u
     skills_dir = home / "skills"
     write_skill(skills_dir, "a")
-    write_skill(skills_dir, "b")
-    write_skill(skills_dir, "h")
-    (skills_dir / ".bundled_manifest").write_text("b:abc\n", encoding="utf-8")
-    hub = skills_dir / ".hub"
-    hub.mkdir()
-    (hub / "lock.json").write_text(json.dumps({"installed": {"h": {}}}), encoding="utf-8")
-    rows = {r["name"]: r["provenance"] for r in u.usage_report()}
-    assert rows == {"a": "agent", "b": "bundled", "h": "hub"}
+    write_skill(skills_dir, "mine")
+    u.mark_agent_created("a")
+    real = write_skill(tmp_path / "ext", "shared")
+    write_skill(tmp_path / "ext", "linked")
+    os.symlink(tmp_path / "ext" / "linked", skills_dir / "linked")
+    set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
+    rows = {r["name"]: r["owner"] for r in u.usage_report()}
+    assert rows == {"a": "managed", "mine": "user", "shared": "external", "linked": "user"}
+    assert u.owner("a") == "managed" and u.owner("shared") == "external" and u.owner("linked") == "user"
 
 
 def test_telemetry_provenance_labels(home, set_config, tmp_path):
     from curator import skill_usage as u
     skills_dir = home / "skills"
     write_skill(skills_dir, "local")
-    (skills_dir / ".bundled_manifest").write_text("b:abc\n", encoding="utf-8")
     ext = tmp_path / "ext"
     write_skill(ext, "ext-skill")
     set_config({"skills": {"external_dirs": [str(ext)]}})
-    assert u.telemetry_provenance("b") == "installed"
     assert u.telemetry_provenance("x", {"created_by": "agent"}) == "agent_created"
-    assert u.telemetry_provenance("x", {"created_by": "installed"}) == "installed"
     assert u.telemetry_provenance("ext-skill") == "external"
     assert u.telemetry_provenance("local") == "local"
     assert u.telemetry_provenance("nowhere") == "unknown"
@@ -521,20 +424,16 @@ def test_telemetry_provenance_labels(home, set_config, tmp_path):
 # Telemetry vs curation — usage is tracked for ALL skills; curation is not
 # ---------------------------------------------------------------------------
 
-def test_end_to_end_telemetry_tracked_but_lifecycle_refused(home):
+def test_end_to_end_telemetry_tracked_but_lifecycle_refused(home, tmp_path, set_config):
     from curator.skill_usage import (
         STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE, archive_skill, bump_patch, bump_use, bump_view,
         load_usage, set_pinned, set_state)
     skills_dir = home / "skills"
-    write_skill(skills_dir, "bundled-one")
-    write_skill(skills_dir, "hub-one")
     write_skill(skills_dir, "mine")
-    (skills_dir / ".bundled_manifest").write_text("bundled-one:abc\n", encoding="utf-8")
-    hub = skills_dir / ".hub"
-    hub.mkdir()
-    (hub / "lock.json").write_text(json.dumps({"installed": {"hub-one": {}}}), encoding="utf-8")
+    write_skill(tmp_path / "ext", "ext-one")
+    set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
 
-    for name in ("bundled-one", "hub-one"):
+    for name in ("ext-one",):
         bump_view(name)
         bump_use(name)
         bump_patch(name)
@@ -545,7 +444,7 @@ def test_end_to_end_telemetry_tracked_but_lifecycle_refused(home):
         assert not ok
 
     data = load_usage()
-    for name in ("bundled-one", "hub-one"):
+    for name in ("ext-one",):
         assert data[name]["view_count"] == 1
         assert data[name]["use_count"] == 1
         assert data[name]["patch_count"] == 1
@@ -553,8 +452,7 @@ def test_end_to_end_telemetry_tracked_but_lifecycle_refused(home):
         assert data[name]["archived_at"] is None
         assert data[name]["pinned"] is False
         assert data[name].get("created_by") != "agent"
-    assert (skills_dir / "bundled-one" / "SKILL.md").exists()
-    assert (skills_dir / "hub-one" / "SKILL.md").exists()
+    assert (tmp_path / "ext" / "ext-one" / "SKILL.md").exists()
     bump_view("mine")
     assert load_usage()["mine"]["view_count"] == 1
 
@@ -597,26 +495,14 @@ def test_adopt_preserves_the_inactivity_clock(home):
     assert adopt_skill("legacy") == (True, "'legacy' is already curator-managed")
 
 
-@pytest.mark.parametrize("kind", ["bundled", "hub", "protected", "missing"])
-def test_adopt_refuses_skills_the_user_does_not_own(home, monkeypatch, set_config, kind):
-    from curator import skill_usage
+@pytest.mark.parametrize("kind", ["external", "missing"])
+def test_adopt_refuses_skills_the_user_does_not_own(home, tmp_path, set_config, kind):
     from curator.skill_usage import adopt_skill, load_usage
-    set_config({"curator": {"prune_builtins": True}})
     skills_dir = home / "skills"
-    if kind == "bundled":
-        name = "bundled-one"
-        write_skill(skills_dir, name)
-        (skills_dir / ".bundled_manifest").write_text(f"{name}:abc\n", encoding="utf-8")
-    elif kind == "hub":
-        name = "hub-one"
-        write_skill(skills_dir, name)
-        hub = skills_dir / ".hub"
-        hub.mkdir()
-        (hub / "lock.json").write_text(json.dumps({"installed": {name: {}}}), encoding="utf-8")
-    elif kind == "protected":
-        name = "sentinel-protected-skill"
-        monkeypatch.setattr(skill_usage, "PROTECTED_BUILTIN_SKILLS", {name})
-        write_skill(skills_dir, name)
+    if kind == "external":
+        name = "ext-one"
+        write_skill(tmp_path / "ext", name)
+        set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
     else:
         name = "no-such-skill"
     ok, _msg = adopt_skill(name)
@@ -629,12 +515,12 @@ def test_adopt_rejects_empty_name(home):
     assert adopt_skill("")[0] is False
 
 
-def test_set_sync_flag_is_curation_gated(home):
+def test_set_sync_flag_is_curation_gated(home, tmp_path, set_config):
     from curator import skill_usage as u
     skills_dir = home / "skills"
     write_skill(skills_dir, "mine")
-    write_skill(skills_dir, "b")
-    (skills_dir / ".bundled_manifest").write_text("b:abc\n", encoding="utf-8")
+    write_skill(tmp_path / "ext", "b")
+    set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
     u.set_sync("mine", True)
     u.set_sync("b", True)
     assert u.is_sync_enabled("mine") is True

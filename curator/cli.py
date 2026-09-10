@@ -101,9 +101,7 @@ def _cmd_status(args) -> int:
     for r in rows:
         by_state.setdefault(r.get("state", "active"), []).append(r)
     pinned = [r["name"] for r in rows if r.get("pinned")]
-    provenance = [r.get("provenance", "agent") for r in rows]
-    print(f"\ncurator-managed skills: {len(rows)} total  "
-          f"(agent-created={provenance.count('agent')}  bundled={provenance.count('bundled')})")
+    print(f"\ncurator-managed skills: {len(rows)} total")
     for state_name in ("active", "stale", "archived"):
         print(f"  {state_name:10s} {len(by_state.get(state_name, []))}")
     if pinned:
@@ -170,14 +168,14 @@ def _cmd_resume(args) -> int:
 
 
 _PIN_MESSAGES = {
-    True: ("cannot pin (only agent-created skills participate in curation)",
-           "could not pin '{skill}' — the skill is not curation-eligible (protected built-in or external). "
+    True: ("cannot pin (only skills in the curated tree participate in curation)",
+           "could not pin '{skill}' — the skill is not curation-eligible (external). "
            f"`{_cmd('list-unmanaged')}` shows which skills the curator tracks.",
            "pinned '{skill}' (recorded; this skill is unmanaged — auto-transitions never consider it. "
            f"Run `{_cmd('adopt {skill}')}` to put it under curator management)",
            "pinned '{skill}' (will bypass auto-transitions)"),
-    False: ("there's nothing to unpin (curator only tracks agent-created skills)",
-            "could not unpin '{skill}' — the skill is not curation-eligible (protected built-in or external).",
+    False: ("there's nothing to unpin (curator only tracks skills in the curated tree)",
+            "could not unpin '{skill}' — the skill is not curation-eligible (external).",
             "unpinned '{skill}' (recorded; this skill is unmanaged — it was never under auto-transitions to begin with)",
             "unpinned '{skill}'")}
 
@@ -187,7 +185,7 @@ def _set_pin(args, pinned: bool) -> int:
     not_agent, not_eligible, unmanaged, done = _PIN_MESSAGES[pinned]
     skill = args.skill
     if not skill_usage.is_agent_created(skill):
-        print(f"curator: '{skill}' is bundled or hub-installed — {not_agent}")
+        print(f"curator: '{skill}' lives only in skills.external_dirs — {not_agent}")
         return 1
     if not skill_usage.set_pinned(skill, pinned):
         print("curator: " + not_eligible.replace("{skill}", skill))
@@ -452,9 +450,11 @@ def _cmd_rollback(args) -> int:
                 print(f"  cron jobs:   {cron.get('jobs_count', 0)} (will be restored for skill-link fields only)")
             else:
                 print(f"  cron jobs:   not in snapshot ({cron.get('reason', 'not captured')})")
-    print("\nThis will replace the current skills tree (a safety snapshot of the current state is taken first "
-          "so this is undoable). Cron jobs that still exist will have their skills/skill fields restored from "
-          "the snapshot; all other cron fields are left alone.")
+    print("\nThis will replace the current skills tree — EVERY skill, including ones the curator does not manage — "
+          "with the snapshot (a safety snapshot of the current state is taken first, so this is undoable). "
+          f"To undo a single curator mutation instead, use `{_cmd('rollback <ledger-entry-id>')}`. "
+          "Cron jobs that still exist will have their skills/skill fields restored from the snapshot; "
+          "all other cron fields are left alone.")
     if not getattr(args, "yes", False) and not _confirm("Proceed? [y/N] "):
         return 1
     ok, msg, _ = curator_backup.rollback(backup_id=target_path.name)
@@ -478,9 +478,9 @@ def _cmd_usage(args) -> int:
     import json as _json
     from curator import skill_usage
     rows = skill_usage.usage_report()
-    prov_filter = getattr(args, "provenance", None)
-    if prov_filter:
-        rows = [r for r in rows if r.get("provenance") == prov_filter]
+    owner_filter = getattr(args, "owner", None)
+    if owner_filter:
+        rows = [r for r in rows if r.get("owner") == owner_filter]
     key, reverse = _USAGE_SORTS.get(getattr(args, "sort", "activity"), _USAGE_SORTS["activity"])
     rows.sort(key=key, reverse=reverse)
     if getattr(args, "json", False):
@@ -489,12 +489,12 @@ def _cmd_usage(args) -> int:
     if not rows:
         print("curator: no skills found")
         return 0
-    provenance = [r.get("provenance", "agent") for r in rows]
-    counts = {k: provenance.count(k) for k in ("agent", "bundled", "hub")}
-    print(f"skills: {len(rows)} total  (agent={counts['agent']}  bundled={counts['bundled']}  hub={counts['hub']})\n")
-    print(f"  {'skill':40s}  {'origin':8s}  {'use':>4s}  {'view':>4s}  {'patch':>5s}  {'act':>4s}  last_activity")
+    owners = [r.get("owner", "user") for r in rows]
+    counts = {k: owners.count(k) for k in ("managed", "user", "external")}
+    print(f"skills: {len(rows)} total  (managed={counts['managed']}  user={counts['user']}  external={counts['external']})\n")
+    print(f"  {'skill':40s}  {'owner':8s}  {'use':>4s}  {'view':>4s}  {'patch':>5s}  {'act':>4s}  last_activity")
     for r in rows:
-        print(f"  {r['name'][:40]:40s}  {r.get('provenance', 'agent'):8s}  {r.get('use_count', 0):>4d}  "
+        print(f"  {r['name'][:40]:40s}  {r.get('owner', 'user'):8s}  {r.get('use_count', 0):>4d}  "
               f"{r.get('view_count', 0):>4d}  {r.get('patch_count', 0):>5d}  {r.get('activity_count', 0):>4d}  "
               f"{_fmt_ts(r.get('last_activity_at'))}")
     return 0
@@ -510,10 +510,10 @@ _STORE_TRUE = dict(action="store_true")
 
 _SUBCOMMANDS = (
     ("status", "Show curator status and skill stats", _cmd_status),
-    ("usage", "Show usage telemetry for ALL skills (built-in, hub, agent) with provenance", _cmd_usage,
+    ("usage", "Show usage telemetry for ALL skills the curator scans, with ownership", _cmd_usage,
      _arg("--sort", choices=("activity", "recent", "name"), default="activity",
           help="Sort order: activity (most-used first, default), recent (most-recently-active first), or name"),
-     _arg("--provenance", choices=("agent", "bundled", "hub"), default=None, help="Only show skills of this origin"),
+     _arg("--owner", choices=("managed", "user", "external"), default=None, help="Only show skills with this ownership"),
      _arg("--json", **_STORE_TRUE, help="Emit the full report as JSON instead of a table")),
     ("run", "Trigger a curator review now", _cmd_run,
      _arg("--sync", "--synchronous", dest="synchronous", **_STORE_TRUE,

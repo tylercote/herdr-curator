@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 PLATFORM_MAP = {"macos": "darwin", "linux": "linux", "windows": "win32"}
 
 EXCLUDED_SKILL_DIRS = frozenset((
-    ".git", ".github", ".hub", ".archive", ".curator_backups",
+    ".git", ".github", ".archive", ".curator_backups",
     ".venv", "venv", "node_modules", "site-packages", "__pycache__",
     ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
 ))
@@ -462,15 +462,50 @@ def _resolve_for_skill_ownership(path) -> Path:
         return path_obj.expanduser().absolute()
 
 
+def _local_link_targets() -> List[Path]:
+    """Resolved targets of symlinked entries in the curated tree (``<name>`` or ``<category>/<name>``).
+
+    A skill linked INTO the curated tree is local even when its real files sit under a
+    registered external dir — the link is the adoption. Without this, registering e.g.
+    ``~/.agents/skills`` for telemetry would flip ``~/.claude/skills/x -> ~/.agents/skills/x``
+    to read-only."""
+    base = get_skills_dir()
+    targets: List[Path] = []
+    try:
+        for entry in base.iterdir():
+            if entry.name in EXCLUDED_SKILL_DIRS:
+                continue
+            children = [entry] if entry.is_symlink() else ([c for c in entry.iterdir() if c.is_symlink()] if entry.is_dir() else [])
+            for child in children:
+                try:
+                    targets.append(child.resolve())
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return targets
+
+
 def is_external_skill_path(path) -> bool:
-    """Under an external or trusted-project skills dir: externally owned, read-only to curation."""
+    """Under an external or trusted-project skills dir: externally owned, read-only to curation.
+
+    Judged both by where the path *sits* (lexically) and where it *resolves*: a symlink inside an
+    external dir that points elsewhere is still external, and a skill linked into the curated tree
+    is local even if its target sits under an external root."""
     candidate = _resolve_for_skill_ownership(path)
+    if any(candidate == t or candidate.is_relative_to(t) for t in _local_link_targets()):
+        return False
+    lexical = (path if isinstance(path, Path) else Path(str(path))).expanduser().absolute()
     roots: List[Path] = list(get_external_skills_dirs())
     try:
         roots.extend(get_project_skills_dirs())
     except Exception:
         pass
-    return any(candidate.is_relative_to(_resolve_for_skill_ownership(root)) for root in roots)
+    for root in roots:
+        resolved_root = _resolve_for_skill_ownership(root)
+        if candidate.is_relative_to(resolved_root) or lexical.is_relative_to(resolved_root) or lexical.is_relative_to(root):
+            return True
+    return False
 
 
 def iter_skill_index_files(skills_dir: Path, filename: str):

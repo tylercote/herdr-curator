@@ -43,6 +43,8 @@ def herdr_env(home, monkeypatch, tmp_path):
     monkeypatch.setenv("HERDR_ENV", "1")
     fake = FakeHerdr()
     monkeypatch.setattr(herdr, "_herdr", fake)
+    from curator import integrations
+    monkeypatch.setattr(integrations.shutil, "which", lambda name: None)  # no real host agents leak into tests
     return {"herdr": herdr, "fake": fake, "state": state}
 
 
@@ -277,3 +279,38 @@ def test_bin_entrypoint_routes_verbs(home):
     assert out.returncode == 0 and "curator: ENABLED" in out.stdout
     out = subprocess.run([sys.executable, str(ROOT / "bin" / "curator"), "--help"], env=env, capture_output=True, text=True, timeout=60)
     assert out.returncode == 0 and "mcp-serve" in out.stdout and "daemon" in out.stdout
+
+
+def test_startup_reconciles_hooks_and_notifies_only_on_change(herdr_env, monkeypatch):
+    from curator import integrations
+    h, fake = herdr_env["herdr"], herdr_env["fake"]
+    results = iter([{"installed": ["claude", "codex"], "registered": ["~/.agents/skills"], "failed": [], "launcher": "x"},
+                    {"installed": [], "registered": [], "failed": [], "launcher": "x"}])
+    monkeypatch.setattr(integrations, "reconcile", lambda: next(results))
+    monkeypatch.setattr(h, "tick", lambda **kw: None)
+    h.startup(spawn_daemon=False)
+    bodies = [c[4] for c in fake.calls if c[:2] == ["notification", "show"]]
+    assert any("claude, codex" in b and "/hooks" in b and ".agents/skills" in b for b in bodies)
+    n = len(fake.calls)
+    h.startup(spawn_daemon=False)
+    assert not any("hooks installed" in c[4] for c in fake.calls[n:] if c[:2] == ["notification", "show"])
+
+
+def test_startup_survives_reconcile_failure(herdr_env, monkeypatch):
+    from curator import integrations
+    h, fake = herdr_env["herdr"], herdr_env["fake"]
+    monkeypatch.setattr(integrations, "reconcile", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(h, "tick", lambda **kw: None)
+    assert h.startup(spawn_daemon=False) == 0
+    assert any("hook setup failed: boom" in c[4] for c in fake.calls if c[:2] == ["notification", "show"])
+
+
+def test_setup_pane_installs_and_shows_status(herdr_env, monkeypatch, capsys, tmp_path):
+    from curator import integrations
+    h = herdr_env["herdr"]
+    (tmp_path / ".pi" / "agent").mkdir(parents=True)
+    monkeypatch.setattr(integrations.shutil, "which", lambda name: None)
+    monkeypatch.setattr(h, "_wait_for_key", lambda: None)
+    assert h.pane("setup") == 0
+    out = capsys.readouterr().out
+    assert "pi:       installed" in out and "launcher:" in out and integrations.pi_extension_path().exists()

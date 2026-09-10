@@ -73,14 +73,14 @@ def test_bare_cli_and_plugin_resolve_identical_paths(herdr_layout, monkeypatch):
 
 
 def test_plugin_config_is_read_without_herdr_layout(herdr_layout):
-    """The plugin's config.json governs a bare `curator` too (prune_builtins etc. must not silently flip)."""
+    """The plugin's config.json governs a bare `curator` too (consolidate etc. must not silently flip)."""
     import json
     from curator import config, paths
     cfg_dir = herdr_layout / "xdg-config" / "herdr" / "plugins" / "config" / "curator"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.json").write_text(json.dumps({"skills": {"dir": "~/work/skills"}, "curator": {"prune_builtins": False}}))
+    (cfg_dir / "config.json").write_text(json.dumps({"skills": {"dir": "~/work/skills"}, "curator": {"consolidate": True}}))
     config.clear_cache()
-    assert config.load_config_readonly()["curator"]["prune_builtins"] is False
+    assert config.load_config_readonly()["curator"]["consolidate"] is True
     assert paths.skills_dir() == herdr_layout / "work" / "skills"
 
 

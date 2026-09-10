@@ -22,6 +22,7 @@ Package map:
     llm_review            the consolidation pass on headless coding agents
     skills_tui            `curator skills`: enable/disable, browse, edit
     herdr                 Herdr host layer: startup, daemon, actions, panes
+    integrations          telemetry hooks for host agents (claude / codex / opencode / pi)
 """
 
 __version__ = "0.1.0"

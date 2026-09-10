@@ -53,6 +53,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         # Audit ledger: every skill mutation appends to <skills>/.curator_ledger.jsonl.
         "ledger": True,
     },
+    # Telemetry hooks in the host agents (see integrations.py). Reconciled at every Herdr session start.
+    "hooks": {
+        "auto": True,                 # install/refresh hooks for every detected host
+        "hosts": [],                  # subset of claude/codex/opencode/pi; empty = all detected
+        "register_skill_dirs": True,  # add the hosts' native skill dirs to skills.external_dirs (read-only)
+    },
     "curator": {
         "enabled": True,
         "interval_hours": 24 * 7,
@@ -60,7 +66,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "stale_after_days": 30,
         "archive_after_days": 90,
         "consolidate": False,
-        "prune_builtins": True,
         "archive_ttl_days": 0,
         "backup": {"enabled": True, "keep": 5},
     },

@@ -11,8 +11,14 @@ description = "Skill curator: usage telemetry, stale/archive lifecycle, snapshot
 [[build]]
 command = ["sh", "-c", "python3 -c 'import sys; assert sys.version_info >= (3, 9), sys.version'"]
 
-# Session start: show the first-run / rename-map notices, run one fully-idle tick, then spawn
-# the detached 60 s scheduler daemon.
+# Install/link/update: (re)write the stable hook launcher the host agents point at, so a new
+# checkout path never strands a hook. Touches nothing outside the plugin's own state dir.
+[[build]]
+command = ["sh", "-c", "exec python3 bin/curator hooks launcher"]
+
+# Session start: reconcile telemetry hooks in the host agents (launcher, auto-install, skill dirs),
+# show the first-run / rename-map notices, run one fully-idle tick, then spawn the detached 60 s
+# scheduler daemon.
 [[startup]]
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" startup"]
 
@@ -39,6 +45,12 @@ id = "report"
 title = "Curator: report"
 placement = "overlay"
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane report"]
+
+[[panes]]
+id = "setup"
+title = "Curator: setup"
+placement = "overlay"
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" pane setup"]
 
 [[panes]]
 id = "console"
@@ -94,6 +106,13 @@ title = "Curator: console"
 description = "Interactive menu over every curator verb (pin, adopt, restore, rollback, ledger, ...)."
 contexts = ["global", "workspace", "pane"]
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action console"]
+
+[[actions]]
+id = "setup"
+title = "Curator: setup telemetry hooks"
+description = "Install/refresh the hooks that let Claude Code, Codex, OpenCode and pi report skill loads (runs automatically at session start; this forces it now)."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action setup"]
 
 [[actions]]
 id = "report-link"

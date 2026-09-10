@@ -106,8 +106,8 @@ class SkillsModel:
         for name in skill_usage.list_archived_skill_names():
             if name in seen:
                 continue
-            rec = {**skill_usage.get_record(name), "state": skill_usage.STATE_ARCHIVED,
-                   "provenance": skill_usage.provenance(name)}
+            rec = {**skill_usage.get_record(name), "state": skill_usage.STATE_ARCHIVED}
+            rec["owner"] = skill_usage.owner_of(rec, external=False)
             rec.update(last_activity_at=skill_usage.latest_activity_at(rec), activity_count=skill_usage.activity_count(rec))
             out.append(self._row(name, rec, {}, disabled, paths.archive_dir() / name))
         return sorted(out, key=lambda s: (s.get("category") or "", s["name"]))
@@ -117,7 +117,7 @@ class SkillsModel:
         from curator import skill_usage
         return {
             "name": name, "category": meta.get("category"), "description": meta.get("description") or "",
-            "provenance": rec.get("provenance", "agent"), "state": rec.get("state", "active"),
+            "owner": rec.get("owner", "user"), "state": rec.get("state", "active"),
             "pinned": bool(rec.get("pinned")), "managed": skill_usage._is_curator_managed_record(rec),
             "enabled": name not in disabled,
             "use_count": rec.get("use_count", 0), "view_count": rec.get("view_count", 0),
@@ -155,7 +155,7 @@ class SkillsModel:
     def pin(self, name: str, pinned: bool) -> Tuple[bool, str]:
         from curator import skill_usage
         if not skill_usage.is_agent_created(name):
-            return False, f"'{name}' is bundled or hub-installed — cannot pin"
+            return False, f"'{name}' lives only in skills.external_dirs — cannot pin"
         if not skill_usage.set_pinned(name, pinned):
             return False, f"could not {'pin' if pinned else 'unpin'} '{name}' — not curation-eligible"
         return True, f"{'pinned' if pinned else 'unpinned'} '{name}'"

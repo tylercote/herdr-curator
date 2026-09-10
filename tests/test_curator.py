@@ -44,17 +44,15 @@ def test_curator_defaults(cur):
     assert cur.get_archive_after_days() == 90
     assert cur.is_enabled() is True
     assert cur.get_consolidate() is False
-    assert cur.get_prune_builtins() is False  # fixture pins it off
 
 
 def test_config_overrides_and_bad_values(cur, set_config):
     set_config({"curator": {"interval_hours": "12", "min_idle_hours": "bogus", "enabled": False,
-                            "consolidate": True, "prune_builtins": True}})
+                            "consolidate": True}})
     assert cur.get_interval_hours() == 12
     assert cur.get_min_idle_hours() == 2  # cast failure -> default
     assert cur.is_enabled() is False
     assert cur.get_consolidate() is True
-    assert cur.get_prune_builtins() is True
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +125,7 @@ def test_transitions_stale_archive_reactivate(cur, home):
     _backdate(u, "ancient", 200)
     _backdate(u, "revived", 1, state="stale")
     counts = cur.apply_automatic_transitions()
-    assert counts == {"marked_stale": 1, "archived": 1, "reactivated": 1, "checked": 4, "seeded": 0}
+    assert counts == {"marked_stale": 1, "archived": 1, "reactivated": 1, "checked": 4}
     usage = u.load_usage()
     assert usage["fresh"]["state"] == "active"
     assert usage["old"]["state"] == "stale"
@@ -176,17 +174,6 @@ def test_never_used_skill_gets_grace_floor(cur, home):
     assert counts["reactivated"] == 1
 
 
-def test_first_sight_seeds_record_instead_of_transitioning(cur, home, set_config):
-    from curator import skill_usage as u
-    skills = home / "skills"
-    write_skill(skills, "builtin")
-    (skills / ".bundled_manifest").write_text("builtin:abc\n", encoding="utf-8")
-    set_config({"curator": {"prune_builtins": True}})
-    counts = cur.apply_automatic_transitions()
-    assert counts["seeded"] == 1 and counts["archived"] == 0
-    assert u.load_usage()["builtin"]["state"] == "active"
-
-
 def test_candidate_list_marks_cron_referenced_skills(cur, home, monkeypatch):
     from curator import skill_usage as u
     skills = home / "skills"
@@ -199,7 +186,7 @@ def test_candidate_list_marks_cron_referenced_skills(cur, home, monkeypatch):
     cron_line = next(l for l in listing.splitlines() if l.startswith("- cron-dep"))
     plain_line = next(l for l in listing.splitlines() if l.startswith("- plain"))
     assert "cron=yes" in cron_line and "cron=no" in plain_line
-    assert "provenance=agent" in plain_line and "pinned=no" in plain_line
+    assert "pinned=no" in plain_line
 
 
 def test_candidate_list_empty(cur):
@@ -256,64 +243,6 @@ def test_corrupt_cron_store_never_crashes_transitions(cur, home):
     assert cur.apply_automatic_transitions()["checked"] == 0
 
 
-# ---------------------------------------------------------------------------
-# prune_builtins
-# ---------------------------------------------------------------------------
-
-def test_protected_builtin_never_archived_even_when_stale(cur, home, monkeypatch, set_config):
-    from curator import skill_usage as u
-    skills = home / "skills"
-    name = "sentinel-protected-skill"
-    monkeypatch.setattr(u, "PROTECTED_BUILTIN_SKILLS", {name})
-    write_skill(skills, name)
-    (skills / ".bundled_manifest").write_text(f"{name}:abc\n", encoding="utf-8")
-    set_config({"curator": {"prune_builtins": True}})
-    super_old = (datetime.now(timezone.utc) - timedelta(days=500)).isoformat()
-    data = u.load_usage()
-    data[name] = u._empty_record()
-    data[name]["last_used_at"] = super_old
-    u.save_usage(data)
-    counts = cur.apply_automatic_transitions()
-    assert counts["archived"] == 0
-    assert name not in u.list_agent_created_skill_names()
-    assert (skills / name).exists()
-    assert name not in u.read_suppressed_names()
-
-
-def test_prune_builtins_archives_stale_bundled_and_suppresses(cur, home, set_config):
-    from curator import skill_usage as u
-    skills = home / "skills"
-    write_skill(skills, "ship")
-    (skills / ".bundled_manifest").write_text("ship:abc\n", encoding="utf-8")
-    set_config({"curator": {"prune_builtins": True}})
-    super_old = (datetime.now(timezone.utc) - timedelta(days=500)).isoformat()
-    data = u.load_usage()
-    data["ship"] = u._empty_record()
-    data["ship"].update(last_used_at=super_old, use_count=3)
-    u.save_usage(data)
-    counts = cur.apply_automatic_transitions()
-    assert counts["archived"] == 1
-    assert u.read_suppressed_names() == {"ship"}
-
-
-def test_prune_builtins_never_touches_hub_skills(cur, home, set_config):
-    from curator import skill_usage as u
-    skills = home / "skills"
-    write_skill(skills, "hubskill")
-    hub_dir = skills / ".hub"
-    hub_dir.mkdir(parents=True, exist_ok=True)
-    (hub_dir / "lock.json").write_text('{"version": 1, "installed": {"hubskill": {"install_path": "hubskill"}}}',
-                                       encoding="utf-8")
-    set_config({"curator": {"prune_builtins": True}})
-    assert u.is_curation_eligible("hubskill") is False
-    ok, msg = u.archive_skill("hubskill")
-    assert ok is False and "hub-installed" in msg
-    assert (skills / "hubskill").exists()
-
-
-# ---------------------------------------------------------------------------
-# run_curator_review orchestration
-# ---------------------------------------------------------------------------
 
 def test_run_review_records_state(cur, home):
     from curator import skill_usage as u
@@ -461,23 +390,6 @@ def test_review_prompt_does_not_steer_terminal_writes(cur):
     for text in (cur.CURATOR_REVIEW_PROMPT, cur.CURATOR_DRY_RUN_BANNER):
         assert "mkdir -p" not in text and "&& mv" not in text
 
-
-def test_prune_builtins_note_appended_only_when_on(cur, home, monkeypatch, set_config):
-    from curator import skill_usage as u
-    write_skill(home / "skills", "a")
-    u.mark_agent_created("a")
-    captured = {}
-    monkeypatch.setattr(cur, "_run_llm_review", lambda prompt: captured.__setitem__("p", prompt) or _llm_meta())
-    cur.run_curator_review(synchronous=True, consolidate=True)
-    assert "PRUNE-BUILTINS MODE IS ON" not in captured["p"]
-    set_config({"curator": {"prune_builtins": True}})
-    cur.run_curator_review(synchronous=True, consolidate=True)
-    assert "PRUNE-BUILTINS MODE IS ON" in captured["p"]
-
-
-# ---------------------------------------------------------------------------
-# review-model resolution (canonical auxiliary.curator slot)
-# ---------------------------------------------------------------------------
 
 def test_review_runtime_passes_auxiliary_curator_credentials(cur):
     cfg = {"model": {"provider": "openrouter", "default": "openai/gpt-5.5"},

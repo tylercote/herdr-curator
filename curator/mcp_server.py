@@ -4,8 +4,8 @@ This is the fork's ENTIRE tool surface: ``skills_list``, ``skill_view``,
 ``skill_manage``. The process
 binds the ``background_review`` write origin for its whole life, so the
 ownership / read-before-write / consolidation-delete guards fire and every
-ledger entry is tagged ``actor=curator``; ``skill_view`` bumps view+use
-telemetry.
+ledger entry is tagged ``actor=curator``; ``skill_view`` bumps the view
+counter only — the pass's own reading is not use.
 
 Every ``tools/call`` is appended to ``<run-dir>/tool_calls.jsonl`` as
 ``{"name", "arguments"}`` (arguments as the JSON string the agent sent), which

@@ -1,7 +1,7 @@
 """Skill usage telemetry + provenance for the Curator (port of ``tools/skill_usage.py``).
 
 A sidecar ``<skills>/.usage.json`` keyed by skill name (never frontmatter —
-keeps telemetry out of user-authored SKILL.md and off bundled/hub skills).
+keeps telemetry out of user-authored SKILL.md).
 Counter bumps are best-effort (DEBUG-logged failures never break a tool call);
 writes are atomic under a cross-process lock. Curator management is an
 explicit ``created_by: agent`` marker — never inferred from location.
@@ -10,7 +10,7 @@ opts out of auto transitions, orthogonal to state.
 
 Record shape::
 
-    {"created_by": None|"agent"|"installed", "use_count", "view_count",
+    {"created_by": None|"agent", "use_count", "view_count",
      "last_used_at", "last_viewed_at", "patch_count", "patch_generation",
      "last_reused_patch_generation", "last_patched_at", "created_at",
      "state", "pinned", "archived_at"}
@@ -42,14 +42,6 @@ except ImportError:  # pragma: no cover
 
 STATE_ACTIVE, STATE_STALE, STATE_ARCHIVED = "active", "stale", "archived"
 _VALID_STATES = {STATE_ACTIVE, STATE_STALE, STATE_ARCHIVED}
-
-# Load-bearing built-ins the curator must NEVER archive/consolidate. Keep tiny.
-PROTECTED_BUILTIN_SKILLS: Set[str] = set()
-
-
-def is_protected_builtin(skill_name: str) -> bool:
-    return skill_name in PROTECTED_BUILTIN_SKILLS
-
 
 def _skills_dir() -> Path:
     return paths.skills_dir()
@@ -134,84 +126,22 @@ def activity_count(record: Dict[str, Any]) -> int:
 
 
 # --- Provenance ----------------------------------------------------------------
-def _read_bundled_manifest_names() -> Set[str]:
-    lines = _read_lines(_skills_dir() / ".bundled_manifest", "Failed to read bundled manifest: %s")
-    return {n for n in (line.split(":", 1)[0].strip() for line in lines) if n}
-
-
-def _read_hub_installed_names() -> Set[str]:
-    """Hub-installed names (``.hub/lock.json``) plus the frontmatter name of each in-tree ``install_path``."""
-    skills_dir = _skills_dir()
-    lock_path = skills_dir / ".hub" / "lock.json"
-    if not lock_path.exists():
-        return set()
-    try:
-        data = json.loads(lock_path.read_text(encoding="utf-8", errors="replace"))
-        installed = (data.get("installed") or {}) if isinstance(data, dict) else None
-        if not isinstance(installed, dict):
-            return set()
-        names = {str(k) for k in installed}
-        install_paths = (e.get("install_path") for e in installed.values() if isinstance(e, dict))
-        for install_path in (p for p in install_paths if isinstance(p, str) and p.strip()):
-            try:
-                resolved = (skills_dir / install_path).resolve()
-                resolved.relative_to(skills_dir.resolve())
-            except (OSError, ValueError):
-                continue
-            if (resolved / "SKILL.md").exists():
-                names.add(_read_skill_name(resolved / "SKILL.md", fallback=resolved.name))
-        return names
-    except (OSError, json.JSONDecodeError) as e:
-        logger.debug("Failed to read hub lock file: %s", e)
-    return set()
-
-
-def _prune_builtins_enabled() -> bool:
-    try:
-        from curator.config import load_config_readonly
-        cur = load_config_readonly().get("curator")
-        return bool(cur.get("prune_builtins", True)) if isinstance(cur, dict) else True
-    except Exception as e:  # pragma: no cover
-        logger.debug("Failed to read curator.prune_builtins: %s", e)
-        return True
-
-
-def read_suppressed_names() -> Set[str]:
-    lines = _read_lines(_skills_dir() / ".curator_suppressed", "Failed to read curator suppression list: %s")
-    return {line for line in lines if not line.startswith("#")}
-
-
-def _toggle_suppressed_name(skill_name: str, *, add: bool) -> None:
-    if not skill_name or (skill_name in (names := read_suppressed_names())) == add:
-        return
-    (names.add if add else names.discard)(skill_name)
-    try:
-        atomic_write_text(_skills_dir() / ".curator_suppressed", "\n".join(sorted(names)) + ("\n" if names else ""),
-                          tmp_prefix=".curator_suppressed_")
-    except Exception as e:
-        logger.debug("Failed to write curator suppression list: %s", e, exc_info=True)
-
-
 def _iter_skill_mds(base: Path, *, local_only: bool) -> Iterator[Tuple[str, Path]]:
     for skill_md in rglob_following_symlinks(base, "SKILL.md"):
         if not (is_excluded_skill_path(skill_md) or (local_only and is_external_skill_path(skill_md))):
             yield _read_skill_name(skill_md, fallback=skill_md.parent.name), skill_md
 
 
-def _scan_local_skills(keep: Callable[[str, Path, Set[str], Dict[str, Any]], bool]) -> List[str]:
+def _scan_local_skills(keep: Callable[[str, Path, Dict[str, Any]], bool]) -> List[str]:
     if not (base := _skills_dir()).exists():
         return []
-    hub, bundled, usage = _read_hub_installed_names(), _read_bundled_manifest_names(), load_usage()
-    return sorted({name for name, skill_md in _iter_skill_mds(base, local_only=True)
-                   if name not in hub and not is_protected_builtin(name) and keep(name, skill_md, bundled, usage)})
+    usage = load_usage()
+    return sorted({name for name, skill_md in _iter_skill_mds(base, local_only=True) if keep(name, skill_md, usage)})
 
 
 def list_agent_created_skill_names() -> List[str]:
-    """Curator-manageable skills: ``created_by: agent`` records plus, with ``curator.prune_builtins``,
-    bundled built-ins. Never hub."""
-    prune_builtins = _prune_builtins_enabled()
-    return _scan_local_skills(
-        lambda name, _md, bundled, usage: prune_builtins if name in bundled else _is_curator_managed_record(usage.get(name)))
+    """Curator-managed skills: local skills with a ``created_by: agent`` record."""
+    return _scan_local_skills(lambda name, _md, usage: _is_curator_managed_record(usage.get(name)))
 
 
 def list_archived_skill_names() -> List[str]:
@@ -234,17 +164,8 @@ def _read_skill_name(skill_md: Path, fallback: str) -> str:
 
 
 def is_agent_created(skill_name: str) -> bool:
-    """Neither bundled nor hub-installed (and not only present in an external dir)."""
-    return not (is_bundled(skill_name) or is_hub_installed(skill_name)) and (
-        _find_skill_dir(skill_name) is not None or _find_external_skill_dir(skill_name) is None)
-
-
-def is_hub_installed(skill_name: str) -> bool:
-    return skill_name in _read_hub_installed_names()
-
-
-def is_bundled(skill_name: str) -> bool:
-    return skill_name in _read_bundled_manifest_names()
+    """Lives in the curated tree (not only in an external dir) — i.e. *could* be adopted."""
+    return _find_skill_dir(skill_name) is not None or _find_external_skill_dir(skill_name) is None
 
 
 def _external_read_only_message(skill_name: str) -> str:
@@ -252,19 +173,16 @@ def _external_read_only_message(skill_name: str) -> str:
 
 
 def is_curation_eligible(skill_name: str, skill_path: Optional[Path] = None) -> bool:
-    """Agent-created: yes. Bundled: only with ``curator.prune_builtins``. Hub / external / protected: never."""
-    if ((skill_path is not None and is_external_skill_path(skill_path)) or is_protected_builtin(skill_name)
-            or is_hub_installed(skill_name)):
+    """Local skills: yes. External: never."""
+    if skill_path is not None and is_external_skill_path(skill_path):
         return False
-    if is_bundled(skill_name):
-        return _prune_builtins_enabled()
     local_dir = _find_skill_dir(skill_name)
     return not is_external_skill_path(local_dir) if local_dir else _find_external_skill_dir(skill_name) is None
 
 
 def _is_curator_managed_record(record: Any) -> bool:
-    """``created_by`` is a curator-management OPT-IN flag, not proof of authorship."""
-    return isinstance(record, dict) and (record.get("created_by") == "agent" or record.get("agent_created") is True)
+    """``created_by == "agent"`` is a curator-management OPT-IN flag, not proof of authorship — the single source of truth."""
+    return isinstance(record, dict) and record.get("created_by") == "agent"
 
 
 def is_curator_managed(skill_name: str) -> bool:
@@ -274,7 +192,7 @@ def is_curator_managed(skill_name: str) -> bool:
 def list_unmanaged_skill_names() -> List[str]:
     """Curation-ELIGIBLE skills without a provenance marker; only ``curator adopt`` hands them over."""
     return _scan_local_skills(
-        lambda name, md, bundled, usage: name not in bundled and not _is_curator_managed_record(usage.get(name))
+        lambda name, md, usage: not _is_curator_managed_record(usage.get(name))
         and is_curation_eligible(name, md))
 
 
@@ -288,12 +206,6 @@ def adopt_skill(skill_name: str) -> Tuple[bool, str]:
     """User-declared handover: writes ``created_by: agent`` (inactivity clock NOT reset)."""
     if not skill_name:
         return False, "no skill name given"
-    if is_protected_builtin(skill_name):
-        return False, f"'{skill_name}' is a protected built-in; the curator never manages it"
-    if is_hub_installed(skill_name):
-        return False, f"'{skill_name}' is hub-installed; its upstream owns it"
-    if is_bundled(skill_name):
-        return False, f"'{skill_name}' is a bundled built-in — it is governed by curator.prune_builtins, not by adoption"
     skill_dir = _find_skill_dir(skill_name)
     if skill_dir is None:
         if _find_external_skill_dir(skill_name) is not None:
@@ -392,11 +304,9 @@ def _bump(rec: Dict[str, Any], count_key: str, ts_key: str) -> None:
 
 
 def telemetry_provenance(skill_name: str, record: Optional[Dict[str, Any]] = None) -> str:
-    if is_hub_installed(skill_name) or is_bundled(skill_name):
-        return "installed"
-    if label := {"installed": "installed", "agent": "agent_created"}.get(
-            record.get("created_by") if isinstance(record, dict) else None):
-        return label
+    """Label for lifecycle events: agent_created | external | local | unknown."""
+    if isinstance(record, dict) and record.get("created_by") == "agent":
+        return "agent_created"
     if _find_external_skill_dir(skill_name) is not None:
         return "external"
     return "local" if _find_skill_dir(skill_name) is not None or isinstance(record, dict) else "unknown"
@@ -459,13 +369,6 @@ def record_created(skill_name: str, *, agent_created: bool, task_id: Optional[st
     _mutate_and_emit(skill_name, "created", _apply, task_id=task_id, session_id=session_id)
 
 
-def record_installed(skill_name: str) -> None:
-    def _apply(rec: Dict[str, Any]) -> Dict[str, Any]:
-        rec.update(created_by="installed", state=STATE_ACTIVE, archived_at=None)
-        return {"created_by": "installed"}
-    _mutate_and_emit(skill_name, "installed", _apply)
-
-
 def mark_agent_created(skill_name: str) -> None:
     _set_field(skill_name, "created_by", "agent")
 
@@ -525,8 +428,6 @@ def _relocate(src: Path, dest: Path, skill_name: str, action: str, **capture_kwa
         except Exception as e:
             return False, f"failed to {action}: {e}"
     archiving = action == "archive"
-    if not archiving or is_bundled(skill_name):
-        _toggle_suppressed_name(skill_name, add=archiving)
     set_state(skill_name, STATE_ARCHIVED if archiving else STATE_ACTIVE)
     with suppress(Exception):
         if _ledger is not None:
@@ -540,11 +441,7 @@ def archive_skill(skill_name: str) -> Tuple[bool, str]:
     if skill_dir is None and _find_external_skill_dir(skill_name) is not None:
         return False, _external_read_only_message(skill_name)
     if not is_curation_eligible(skill_name, skill_dir):
-        if is_protected_builtin(skill_name):
-            return False, f"skill '{skill_name}' is a protected built-in; it backs load-bearing UX and is never archived or consolidated"
-        if is_hub_installed(skill_name):
-            return False, f"skill '{skill_name}' is hub-installed; never archive"
-        return False, f"skill '{skill_name}' is a bundled built-in; enable curator.prune_builtins to allow pruning it"
+        return False, _external_read_only_message(skill_name)
     if skill_dir is None:
         return False, f"skill '{skill_name}' not found"
     if is_external_skill_path(skill_dir):
@@ -560,12 +457,7 @@ def archive_skill(skill_name: str) -> Tuple[bool, str]:
 
 
 def restore_skill(skill_name: str) -> Tuple[bool, str]:
-    """Move an archived skill back to the flat layout. Refuses a name now colliding with a hub
-    skill, or a bundled built-in unless ``curator.prune_builtins`` is on."""
-    if is_hub_installed(skill_name):
-        return False, f"skill '{skill_name}' is now hub-installed; restore would shadow the upstream version"
-    if is_bundled(skill_name) and not _prune_builtins_enabled():
-        return False, f"skill '{skill_name}' is now bundled; restore would shadow the upstream version"
+    """Move an archived skill back to the flat layout."""
     archive_root = _archive_dir()
     if not archive_root.exists():
         return False, "no archive directory"
@@ -596,28 +488,48 @@ def _find_skill_dir(skill_name: str) -> Optional[Path]:
 def _find_external_skill_dir(skill_name: str) -> Optional[Path]:
     from curator.skill_utils import get_all_skills_dirs
     return next((found for base in get_all_skills_dirs()[1:] if base.exists()
-                 if (found := _match_skill_dir((p for p in rglob_following_symlinks(base, "SKILL.md") if not is_excluded_skill_path(p)),
+                 if (found := _match_skill_dir((p for p in rglob_following_symlinks(base, "SKILL.md")
+                                                if not is_excluded_skill_path(p) and is_external_skill_path(p)),  # linked-in skills are local
                                                skill_name)) is not None), None)
 
 
 # --- Reporting --------------------------------------------------------------------
+OWNER_MANAGED, OWNER_USER, OWNER_EXTERNAL = "managed", "user", "external"
+
+
+def owner_of(record: Any, *, external: bool) -> str:
+    """The three ownership classes. ``managed`` = ``created_by: agent`` (the LLM pass created it, or
+    the user adopted it); ``external`` = lives only under ``skills.external_dirs`` (telemetry only,
+    read-only to curation); ``user`` = everything else in the curated tree — never touched."""
+    if external:
+        return OWNER_EXTERNAL
+    return OWNER_MANAGED if _is_curator_managed_record(record) else OWNER_USER
+
+
+def owner(skill_name: str, record: Optional[Dict[str, Any]] = None) -> str:
+    if record is None:
+        record = load_usage().get(skill_name)
+    return owner_of(record, external=_find_skill_dir(skill_name) is None and _find_external_skill_dir(skill_name) is not None)
+
+
 def curated_report() -> List[Dict[str, Any]]:
-    """One backfilled row per curator-managed skill with ``provenance`` and ``_persisted``."""
+    """One backfilled row per curator-managed skill (plus pinned local ones) with ``owner`` and ``_persisted``."""
     data = load_usage()
     names = set(list_agent_created_skill_names())
     names.update(name for name, rec in data.items()
                  if rec.get("pinned") and is_curation_eligible(name) and _find_skill_dir(name) is not None)
-    return [_report_row(n, data.get(n), _persisted=n in data, provenance=provenance(n)) for n in sorted(names)]
-
-
-def provenance(skill_name: str) -> str:
-    return "hub" if is_hub_installed(skill_name) else "bundled" if is_bundled(skill_name) else "agent"
+    return [_report_row(n, data.get(n), _persisted=n in data, owner=owner_of(data.get(n), external=False)) for n in sorted(names)]
 
 
 def usage_report() -> List[Dict[str, Any]]:
-    """Usage rows for EVERY skill on disk (built-ins and hub included)."""
-    if not (base := _skills_dir()).exists():
-        return []
+    """Usage rows for EVERY skill the curator scans: the curated tree plus ``skills.external_dirs``."""
+    from curator.skill_utils import get_all_skills_dirs
     data = load_usage()
-    return [_report_row(n, data.get(n), provenance=provenance(n), _persisted=n in data)
-            for n in sorted({name for name, _md in _iter_skill_mds(base, local_only=False)})]
+    seen: Dict[str, bool] = {}  # name -> external?  (curated tree first, so a linked skill reads as local)
+    for i, base in enumerate(get_all_skills_dirs()):
+        if not base.exists():
+            continue
+        for name, skill_md in _iter_skill_mds(base, local_only=False):
+            seen.setdefault(name, i > 0 or is_external_skill_path(skill_md))
+    return [_report_row(n, data.get(n), owner=owner_of(data.get(n), external=ext), _persisted=n in data)
+            for n, ext in sorted(seen.items())]
