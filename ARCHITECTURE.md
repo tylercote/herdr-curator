@@ -14,7 +14,7 @@ system around it:
 |---|---|
 | know what is used | `.usage.json` sidecar: `use_count`, `view_count`, `patch_count`, timestamps, `created_by`, `state`, `pinned` |
 | retire what is not | `active → stale → archived` transitions from the newest real activity; archive = `mv` into `.archive/`, never delete |
-| never touch what is not yours | three owners — `managed` (`created_by: agent`, set solely by the LLM pass creating a skill or by `curator adopt`), `user` (never touched), `external` (read-only dirs); pinned skills are untouchable; cron-referenced skills are exempt from auto-transitions |
+| never touch what is not yours | three owners — `managed` (`created_by: agent`, set solely by a `skill_manage` create or by `curator adopt`), `user` (never touched), `external` (read-only dirs); pinned skills are untouchable; cron-referenced skills are exempt from auto-transitions |
 | make everything reversible | tar.gz snapshot of the tree before every real pass; a JSONL ledger with before/after blobs for every mutation; whole-tree and single-entry rollback, each taking a safety capture first and failing closed |
 | shrink the library intelligently | an optional LLM pass whose tool surface is exactly `skills_list / skill_view / skill_manage`, audited afterwards |
 | tell the user | `run.json` + `REPORT.md` per run, a rename map in the summary, `status` |
@@ -124,7 +124,7 @@ Eligibility (`is_curation_eligible`) is orthogonal: external-dir skills are
 | ledger | `skill_ledger.record_mutation` via `skill_manager._record_success`, `skill_usage._relocate`, `cli purge` | append-only JSONL, blobs deduped by sha256; **telemetry, never a gate** |
 | single-entry rollback | `skill_ledger.rollback_entry` | validates every path is under home, pre-checks every blob, appends a `pre-rollback` safety entry, then restores before-files and removes files the mutation created; fails closed |
 | whole-tree rollback | `curator_backup.rollback` | safety snapshot first (protected from its own prune), stage current tree, extract with `..`/absolute rejection, carry excluded subtrees (`.git`) back, restore cron `skills`/`skill` fields by job id |
-| pinned guard | `skill_manager_guards._pinned_guard` | pin blocks **delete only**; essential skills always |
+| ownership guard | `skill_manager_guards._ownership_write_guard` | **unconditional** (not origin-gated): refuses non-managed, external and pinned skills for every mutating action; `_pinned_guard` is the delete-path backstop, and essential skills can never be deleted |
 | rmtree guard | `_validate_delete_target` | never delete a symlink, a skills root, or a path outside every root |
 | background-review guards | `_background_review_write_guard`, `_read_before_write_guard`, `_curator_consolidation_delete_guard` | see §7 |
 
@@ -153,7 +153,7 @@ so an agent the user mounts the server in gets exactly the same fence — and in
 
 - `skills_list` labels every row `owner: managed|user|external` and the prompt's rule 1 says only `managed` may be touched; `skill_view` under this origin bumps **view only** — the pass's own reading is not use, so a weekly pass cannot keep every managed skill perpetually active.
 - `skill_view` marks the exact file it served (`mark_background_review_skill_read`); a later `skill_manage` write to a file that was **not** viewed in this review is refused (`_read_before_write_required`). Marks live in a ContextVar holding a lock-protected set, so copied contexts within one review share them and separate reviews do not.
-- ownership guard: pinned, external and **not-curator-managed** skills are refused with the `curator adopt <name>` hint — and the answer is stable across repeated identical attempts (the guard keys on the record's *value*, not its existence).
+- ownership guard (unconditional — it fires under every write origin, so nothing depends on the server binding it): pinned, external and **not-curator-managed** skills are refused with the `curator adopt <name>` hint — and the answer is stable across repeated identical attempts (the guard keys on the record's *value*, not its existence).
 - delete requires `absorbed_into=<existing umbrella>`; `""`/omitted is refused with `_fail_closed`. A verified consolidation **archives** (recoverable) instead of `rmtree`.
 - every call is appended to `tool_calls.jsonl` as `{name, arguments}`; ledger entries carry `actor=curator`.
 - `--dry-run` refuses mutating actions at the server, not just in the prompt banner.

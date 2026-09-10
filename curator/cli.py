@@ -59,10 +59,10 @@ def _print_unmanaged_summary() -> None:
     if not unmanaged:
         return
     legacy = sum(1 for r in unmanaged if not r.get("has_provenance_key"))
-    foreground = len(unmanaged) - legacy
+    bumped = len(unmanaged) - legacy
     print(f"\nunmanaged (no provenance marker): {len(unmanaged)} total")
     print(f"  pre-dates marker    {legacy}")
-    print(f"  foreground-created  {foreground}")
+    print(f"  user-owned (seen)   {bumped}")
     print(f"  never auto-staled or archived — `{_cmd('adopt <name>')}` hands one over")
 
 

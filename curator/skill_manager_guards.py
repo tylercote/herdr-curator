@@ -140,7 +140,8 @@ def _is_pinned(name: str, what: str) -> Optional[bool]:
 
 
 def _pinned_guard(name: str) -> Optional[str]:
-    """Refusal if *name* is pinned or essential. Pin only guards DELETION."""
+    """Delete-time refusal for essential skills (edits stay allowed) and pinned ones. Pinned skills are
+    already refused for every action by ``_ownership_write_guard``; this is the delete-path backstop."""
     try:
         from curator.skill_utils import ESSENTIAL_SKILLS
         if name in ESSENTIAL_SKILLS:
@@ -150,24 +151,24 @@ def _pinned_guard(name: str) -> Optional[str]:
         logger.debug("essential-guard lookup failed for %s", name, exc_info=True)
     if _is_pinned(name, "pinned-guard"):
         return (f"Skill '{name}' is pinned and cannot be deleted by skill_manage. Ask the user to "
-                f"run `{_cmd('unpin ' + name)}` if they want to delete it. Patches and edits "
-                f"are allowed on pinned skills; only deletion is blocked.")
+                f"run `{_cmd('unpin ' + name)}` if they want it changed.")
     return None
 
 
-def _background_review_write_guard(name: str, skill_dir: Path, action: str) -> Optional[Dict[str, Any]]:
-    """Refuse autonomous curator writes to anything but curator-owned sediment."""
-    if not _is_background_review():
-        return None
-    refuse = f"Refusing background curator {action} for"
+def _ownership_write_guard(name: str, skill_dir: Path, action: str) -> Optional[Dict[str, Any]]:
+    """Refuse ``skill_manage`` writes to anything but curator-managed skills. Unconditional: the
+    write origin flavours telemetry (ledger actor, view-vs-use, archive-vs-delete) but never
+    decides whether ownership is checked, so no caller can forget to bind it."""
+    refuse = f"Refusing skill_manage {action} for"
+    name = skill_dir.name  # usage records are keyed by the skill dir name; callers may pass `category/name`
     if _is_pinned(name, "pinned skill guard"):
-        return _refusal(f"{refuse} pinned skill '{name}': pinned skills are off-limits to autonomous maintenance. "
+        return _refusal(f"{refuse} pinned skill '{name}': pinned skills are off-limits to skill_manage. "
                         f"Ask the user to run `{_cmd('unpin ' + name)}` if they want it changed.")
     try:
         from curator.skill_utils import is_external_skill_path
         if is_external_skill_path(skill_dir):
             return _refusal(f"{refuse} skill '{name}': the skill lives in skills.external_dirs, which are "
-                            f"externally owned and read-only to autonomous curation.")
+                            f"externally owned and read-only to skill_manage.")
     except Exception:
         logger.debug("external skill guard lookup failed for %s", name, exc_info=True)
     try:
@@ -176,7 +177,7 @@ def _background_review_write_guard(name: str, skill_dir: Path, action: str) -> O
         if not skill_usage._is_curator_managed_record(usage_rec):
             _detail = (f"created_by={usage_rec.get('created_by')!r}" if isinstance(usage_rec, dict) else "no usage record")
             return _refusal(f"{refuse} skill '{name}': the skill is not curator-managed ({_detail}). User-owned skills "
-                            f"are off-limits to autonomous curation. Run `{_cmd('adopt ' + name)}` to opt it in.")
+                            f"are off-limits to skill_manage. Run `{_cmd('adopt ' + name)}` to opt it in.")
     except Exception:
         logger.warning("owned skill guard lookup failed for %s", name, exc_info=True)
         return _refusal(f"{refuse} skill '{name}': agent ownership could not be verified because the provenance "
@@ -195,12 +196,12 @@ def _background_review_read_before_write_guard(name: str, target: Path, action: 
         _read_before_write_required=True)
 
 
-def _background_review_preflight(action: str, name: str) -> Optional[Dict[str, Any]]:
+def _ownership_preflight(action: str, name: str) -> Optional[Dict[str, Any]]:
     if action not in {"edit", "patch", "delete", "write_file", "remove_file"}:
         return None
     from curator import skill_manager as _smt
     existing = _smt._find_skill(name)
-    return _background_review_write_guard(name, existing["path"], action) if existing else None
+    return _ownership_write_guard(name, existing["path"], action) if existing else None
 
 
 def _curator_consolidation_delete_guard(name: str, absorbed_into: Optional[str]) -> Optional[Dict[str, Any]]:

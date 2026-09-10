@@ -46,6 +46,15 @@ Step 1.
 """
 
 
+def _managed_skill(name: str, content: str, category=None):
+    """Create a skill and mark it curator-managed: skill_manage's write guard refuses everything else."""
+    from curator.skill_manager import _create_skill
+    from curator.skill_usage import mark_agent_created
+    result = _create_skill(name, content, category)
+    if result["success"]:
+        mark_agent_created(name)
+    return result
+
 def _skill_content(name: str) -> str:
     return f"---\nname: {name}\ndescription: A test skill for unit testing.\n---\n\n# {name}\n\nStep 1: Do the thing.\n"
 
@@ -125,9 +134,9 @@ class TestCreateSkill:
         assert _find_skill("fleet-skill")["path"] == fleet / "fleet-skill"
 
     def test_edit_long_desc_still_allowed_with_preview(self, home):
-        from curator.skill_manager import _create_skill, _edit_skill
+        from curator.skill_manager import _edit_skill
         from curator.skill_utils import extract_skill_description, parse_frontmatter
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         result = _edit_skill("my-skill", LONG_DESC_CONTENT)
         assert result["success"] is True and "System prompt will show" in result["system_prompt_preview"]
         fm, _ = parse_frontmatter(LONG_DESC_CONTENT)
@@ -136,28 +145,28 @@ class TestCreateSkill:
 
 class TestEditSkill:
     def test_edit_existing_skill(self, home):
-        from curator.skill_manager import _create_skill, _edit_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _edit_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         assert _edit_skill("my-skill", VALID_SKILL_CONTENT_2)["success"] is True
         assert "Updated description" in (home / "skills" / "my-skill" / "SKILL.md").read_text()
 
     def test_edit_existing_skill_by_categorized_path(self, home):
-        from curator.skill_manager import _create_skill, _edit_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT, category="software-development")
+        from curator.skill_manager import _edit_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT, category="software-development")
         result = _edit_skill("software-development/my-skill", VALID_SKILL_CONTENT_2)
         assert result["success"] is True, result.get("error")
         assert "Updated description" in (home / "skills" / "software-development" / "my-skill" / "SKILL.md").read_text()
 
     def test_find_skill_accepts_categorized_path_and_bare_name(self, home):
-        from curator.skill_manager import _create_skill, _find_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT, category="mlops")
+        from curator.skill_manager import _find_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT, category="mlops")
         assert _find_skill("mlops/my-skill")["path"] == home / "skills" / "mlops" / "my-skill"
         assert _find_skill("my-skill")["path"] == home / "skills" / "mlops" / "my-skill"
         assert _find_skill("nope") is None
 
     def test_edit_invalid_content_rejected(self, home):
-        from curator.skill_manager import _create_skill, _edit_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _edit_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         assert _edit_skill("my-skill", "no frontmatter")["success"] is False
         assert "A test skill" in (home / "skills" / "my-skill" / "SKILL.md").read_text()
 
@@ -169,23 +178,23 @@ class TestEditSkill:
 
 class TestPatchSkill:
     def test_patch_unique_match(self, home):
-        from curator.skill_manager import _create_skill, _patch_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _patch_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         result = _patch_skill("my-skill", "Do the thing.", "Do the new thing.")
         assert result["success"] is True and "1 replacement" in result["message"]
         assert "Do the new thing." in (home / "skills" / "my-skill" / "SKILL.md").read_text()
 
     def test_patch_ambiguous_match_rejected(self, home):
-        from curator.skill_manager import _create_skill, _patch_skill
-        _create_skill("my-skill", "---\nname: test-skill\ndescription: A test skill.\n---\n\n# Test\n\nword word\n")
+        from curator.skill_manager import _patch_skill
+        _managed_skill("my-skill", "---\nname: test-skill\ndescription: A test skill.\n---\n\n# Test\n\nword word\n")
         result = _patch_skill("my-skill", "word", "replaced")
         assert result["success"] is False and "match" in result["error"].lower()
         result = _patch_skill("my-skill", "word", "replaced", replace_all=True)
         assert result["success"] is True and "2 replacements" in result["message"]
 
     def test_patch_missing_old_string_tells_the_model_how_to_recover(self, home):
-        from curator.skill_manager import _create_skill, _patch_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _patch_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         result = _patch_skill("my-skill", "", "replacement")
         assert result["success"] is False
         err = result["error"]
@@ -193,8 +202,8 @@ class TestPatchSkill:
         assert "new_string is required" in _patch_skill("my-skill", "x", None)["error"]
 
     def test_patch_no_match_gives_hint_and_preview(self, home):
-        from curator.skill_manager import _create_skill, _patch_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _patch_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         # (a one-letter typo like "thong" is still matched by the last-resort context_aware strategy)
         result = _patch_skill("my-skill", "Completely different text that is nowhere.", "x")
         assert result["success"] is False and "file_preview" in result
@@ -203,24 +212,24 @@ class TestPatchSkill:
         assert near["success"] is False and "Did you mean" in near["error"]
 
     def test_patch_that_breaks_frontmatter_is_rejected(self, home):
-        from curator.skill_manager import _create_skill, _patch_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _patch_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         result = _patch_skill("my-skill", "description: A test skill for unit testing.", "")
         assert result["success"] is False and "break SKILL.md structure" in result["error"]
 
     def test_patch_supporting_file(self, home):
-        from curator.skill_manager import _create_skill, _patch_skill, _write_file
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _patch_skill, _write_file
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         _write_file("my-skill", "references/a.md", "old text here")
         assert _patch_skill("my-skill", "old text", "new text", file_path="references/a.md")["success"]
         assert (home / "skills" / "my-skill" / "references" / "a.md").read_text() == "new text here"
         assert "File not found" in _patch_skill("my-skill", "x", "y", file_path="references/missing.md")["error"]
 
     def test_patch_supporting_file_symlink_escape_blocked(self, home, tmp_path):
-        from curator.skill_manager import _create_skill, _patch_skill
+        from curator.skill_manager import _patch_skill
         outside_file = tmp_path / "outside.txt"
         outside_file.write_text("old text here")
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         link = home / "skills" / "my-skill" / "references" / "evil.md"
         link.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -234,14 +243,14 @@ class TestPatchSkill:
 
 class TestDeleteSkill:
     def test_delete_cleans_empty_category_dir(self, home):
-        from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT, category="devops")
+        from curator.skill_manager import _delete_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT, category="devops")
         assert _delete_skill("my-skill")["success"]
         assert not (home / "skills" / "devops").exists()
 
     def test_delete_with_absorbed_into_equals_self_or_missing_rejected(self, home):
-        from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill("narrow", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _delete_skill
+        _managed_skill("narrow", VALID_SKILL_CONTENT)
         result = _delete_skill("narrow", absorbed_into="narrow")
         assert result["success"] is False and "cannot equal" in result["error"]
         result = _delete_skill("narrow", absorbed_into="ghost-umbrella")
@@ -249,17 +258,17 @@ class TestDeleteSkill:
         assert (home / "skills" / "narrow").exists()
 
     def test_delete_notes_absorption(self, home):
-        from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill("narrow", VALID_SKILL_CONTENT)
-        _create_skill("umbrella", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _delete_skill
+        _managed_skill("narrow", VALID_SKILL_CONTENT)
+        _managed_skill("umbrella", VALID_SKILL_CONTENT)
         result = _delete_skill("narrow", absorbed_into="umbrella")
         assert result["success"] and "absorbed into 'umbrella'" in result["message"]
 
 
 class TestWriteFile:
     def test_write_reference_file(self, home):
-        from curator.skill_manager import _create_skill, _write_file
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _write_file
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         result = _write_file("my-skill", "references/api.md", "# API\nEndpoint docs.")
         assert result["success"] is True and (home / "skills" / "my-skill" / "references" / "api.md").exists()
         assert "Create it first" in _write_file("ghost", "references/a.md", "x")["error"]
@@ -268,10 +277,10 @@ class TestWriteFile:
         assert "1 MiB" in _write_file("my-skill", "references/big.md", big)["error"]
 
     def test_write_symlink_escape_blocked(self, home, tmp_path):
-        from curator.skill_manager import _create_skill, _write_file
+        from curator.skill_manager import _write_file
         outside_dir = tmp_path / "outside"
         outside_dir.mkdir()
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         link = home / "skills" / "my-skill" / "references" / "escape"
         link.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -285,8 +294,8 @@ class TestWriteFile:
 
 class TestRemoveFile:
     def test_remove_existing_file(self, home):
-        from curator.skill_manager import _create_skill, _remove_file, _write_file
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _remove_file, _write_file
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         _write_file("my-skill", "references/api.md", "content")
         assert _remove_file("my-skill", "references/api.md")["success"] is True
         assert not (home / "skills" / "my-skill" / "references").exists()  # empty subdir cleaned
@@ -294,19 +303,19 @@ class TestRemoveFile:
         assert result["success"] is False and "not found" in result["error"]
 
     def test_remove_lists_available_files(self, home):
-        from curator.skill_manager import _create_skill, _remove_file, _write_file
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _remove_file, _write_file
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         _write_file("my-skill", "references/a.md", "x")
         result = _remove_file("my-skill", "references/b.md")
         assert result["available_files"] == ["references/a.md"]
 
     def test_remove_symlink_escape_blocked(self, home, tmp_path):
-        from curator.skill_manager import _create_skill, _remove_file
+        from curator.skill_manager import _remove_file
         outside_dir = tmp_path / "outside"
         outside_dir.mkdir()
         outside_file = outside_dir / "keep.txt"
         outside_file.write_text("content")
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         link = home / "skills" / "my-skill" / "references" / "escape"
         link.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -336,12 +345,14 @@ class TestSkillManageDispatcher:
         r = json.loads(skill_manage(action="patch", name="x", content="c", old_string="a", new_string="b"))
         assert "EITHER content" in r["error"]
 
-    def test_create_records_provenance_only_for_background_review(self, home):
+    def test_create_records_agent_provenance_under_every_origin(self, home):
+        """Whatever the origin, a skill_manage create is agent-made and therefore managed — otherwise
+        its own creator could never edit it again under the unconditional ownership guard."""
         from curator import skill_usage
         from curator.skill_manager import skill_manage
         from curator.skill_provenance import BACKGROUND_REVIEW, reset_current_write_origin, set_current_write_origin
         assert json.loads(skill_manage(action="create", name="fg", content=VALID_SKILL_CONTENT))["success"]
-        assert skill_usage.get_record("fg")["created_by"] is None
+        assert skill_usage.get_record("fg")["created_by"] == "agent"
         tok = set_current_write_origin(BACKGROUND_REVIEW)
         try:
             assert json.loads(skill_manage(action="create", name="bg", content=VALID_SKILL_CONTENT))["success"]
@@ -422,14 +433,24 @@ class TestBackgroundOwnershipPolicyConsistency:
         assert first["success"] == second["success"] is False
         assert "not curator-managed" in first["error"] and "curator adopt flip-skill" in first["error"]
 
-    def test_in_process_foreground_write_is_origin_scoped(self, home):
-        """The ownership guard keys on the write origin. Nothing served to an agent ever runs with the
-        foreground origin (``mcp_server.Server`` binds background_review unconditionally); this pins
-        the library-level scoping that the CLI/TUI rely on."""
+    def test_guard_resolves_categorized_path_to_the_record_key(self, home):
+        """`mlops/x` and `x` are the same skill: ownership is decided by the record, not the spelling."""
+        from curator.skill_manager import _create_skill, skill_manage
+        _create_skill("cat-skill", VALID_SKILL_CONTENT, category="mlops")
+        refused = json.loads(skill_manage(action="patch", name="mlops/cat-skill", old_string="Do the thing.", new_string="x"))
+        assert refused["success"] is False and "curator adopt cat-skill" in refused["error"]
+        _managed_skill("cat-skill2", VALID_SKILL_CONTENT, category="mlops")
+        ok = json.loads(skill_manage(action="patch", name="mlops/cat-skill2", old_string="Do the thing.", new_string="x"))
+        assert ok["success"] is True, ok
+
+    def test_foreground_write_to_unmanaged_skill_refused(self, home):
+        """The ownership guard does not depend on the write origin: even in-process, with the default
+        foreground origin, skill_manage refuses a skill that is not curator-managed."""
         from curator.skill_manager import _create_skill, skill_manage
         _create_skill("no-record", VALID_SKILL_CONTENT)
         res = json.loads(skill_manage(action="patch", name="no-record", old_string="Do the thing.", new_string="Do the new thing."))
-        assert res["success"] is True
+        assert res["success"] is False and "not curator-managed" in res["error"] and "curator adopt no-record" in res["error"]
+        assert "Do the thing." in (home / "skills" / "no-record" / "SKILL.md").read_text()
 
     def test_adopted_skill_becomes_writable_by_autonomous_curation(self, home):
         from curator import skill_usage
@@ -457,35 +478,35 @@ class TestBackgroundOwnershipPolicyConsistency:
 
 
 class TestPinnedGuard:
-    def test_edit_allowed_when_pinned(self, home):
+    def test_edit_refused_when_pinned(self, home):
         from curator import skill_usage
-        from curator.skill_manager import _create_skill, _edit_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _edit_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         assert skill_usage.set_pinned("my-skill", True)
-        assert _edit_skill("my-skill", VALID_SKILL_CONTENT_2)["success"] is True
-        assert "A test skill" not in (home / "skills" / "my-skill" / "SKILL.md").read_text()
+        result = _edit_skill("my-skill", VALID_SKILL_CONTENT_2)
+        assert result["success"] is False and "pinned" in result["error"] and "curator unpin my-skill" in result["error"]
+        assert "A test skill" in (home / "skills" / "my-skill" / "SKILL.md").read_text()
 
     def test_delete_refuses_pinned(self, home):
         from curator import skill_usage
-        from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _delete_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
         assert skill_usage.set_pinned("my-skill", True)
         result = _delete_skill("my-skill")
         assert result["success"] is False
-        assert "pinned" in result["error"].lower() and "cannot be deleted" in result["error"]
-        assert "curator unpin my-skill" in result["error"]
+        assert "pinned" in result["error"].lower() and "curator unpin my-skill" in result["error"]
         assert (home / "skills" / "my-skill" / "SKILL.md").exists()
 
     def test_essential_skill_never_deleted(self, home, essential):
-        from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill(essential, VALID_SKILL_CONTENT)
+        from curator.skill_manager import _delete_skill
+        _managed_skill(essential, VALID_SKILL_CONTENT)
         result = _delete_skill(essential)
         assert result["success"] is False and "essential" in result["error"]
 
     def test_broken_sidecar_fails_open(self, home, monkeypatch):
         from curator import skill_usage
-        from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill("my-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _delete_skill
+        _managed_skill("my-skill", VALID_SKILL_CONTENT)
 
         def _boom(name):
             raise RuntimeError("sidecar broken")
@@ -495,13 +516,15 @@ class TestPinnedGuard:
 
 class TestDeleteSkillRmtreeGuard:
     def test_normal_delete_still_works(self, home):
-        from curator.skill_manager import _create_skill, _delete_skill
-        _create_skill("good-skill", VALID_SKILL_CONTENT)
+        from curator.skill_manager import _delete_skill
+        _managed_skill("good-skill", VALID_SKILL_CONTENT)
         assert _delete_skill("good-skill", absorbed_into="")["success"] is True
         assert not (home / "skills" / "good-skill").exists()
 
     def test_symlinked_skill_dir_refused(self, home, tmp_path, monkeypatch):
         from curator import skill_manager
+        from curator import skill_usage
+        monkeypatch.setattr(skill_usage, "_is_curator_managed_record", lambda rec: True)
         victim = tmp_path / "precious_victim"
         victim.mkdir()
         (victim / "important.txt").write_text("DO NOT DELETE")
@@ -514,6 +537,8 @@ class TestDeleteSkillRmtreeGuard:
 
     def test_out_of_tree_path_refused(self, home, tmp_path, monkeypatch):
         from curator import skill_manager
+        from curator import skill_usage
+        monkeypatch.setattr(skill_usage, "_is_curator_managed_record", lambda rec: True)
         outside = tmp_path / "outside_skill"
         outside.mkdir()
         (outside / "SKILL.md").write_text("x")
@@ -524,6 +549,8 @@ class TestDeleteSkillRmtreeGuard:
 
     def test_skills_root_itself_refused(self, home, monkeypatch):
         from curator import skill_manager
+        from curator import skill_usage
+        monkeypatch.setattr(skill_usage, "_is_curator_managed_record", lambda rec: True)
         monkeypatch.setattr(skill_manager, "_find_skill", lambda name: {"path": home / "skills"})
         result = skill_manager._delete_skill("root", absorbed_into="")
         assert result["success"] is False and "skills root itself" in result["error"]

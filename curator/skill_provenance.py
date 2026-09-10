@@ -1,10 +1,13 @@
-"""Skill write-origin provenance (verbatim port of ``tools/skill_provenance.py``).
+"""Skill write-origin provenance.
 
 A ContextVar separating background-review (curator fork) skill writes from
-foreground user-directed writes. The curator only curates skills the review
-fork created; skills a user asked for belong to the user. The MCP server that
-fronts the consolidation pass binds ``BACKGROUND_REVIEW`` for the life of the
-process; everything else defaults to ``"foreground"``.
+foreground writes. The origin is telemetry and behaviour flavour only: ledger
+``actor`` (curator vs agent), ``skill_view`` counting a view rather than a
+use, delete archiving instead of removing, and the read-before-write and
+consolidation-delete guards. It never decides whether ownership is checked —
+``skill_manager_guards._ownership_write_guard`` refuses non-managed, external
+and pinned skills under every origin. ``mcp_server.Server`` binds
+``BACKGROUND_REVIEW`` for the life of the process; the default is ``"foreground"``.
 """
 
 from __future__ import annotations

@@ -21,7 +21,7 @@ _BATCH_MAX_OPS = 20
 
 
 def _validate_batch_ops(operations, default_name, tool_error):
-    from curator.skill_manager_guards import _background_review_preflight
+    from curator.skill_manager_guards import _ownership_preflight
 
     def fail(i, msg):
         return None, tool_error(f"operations[{i}]{msg}", success=False)
@@ -38,7 +38,7 @@ def _validate_batch_ops(operations, default_name, tool_error):
         names.append(nm)
         if act == "create" and nm in names[:-1]:
             return fail(i, f": create for '{nm}' must precede that skill's other ops.")
-        if (preflight := _background_review_preflight(act, nm)) is not None:
+        if (preflight := _ownership_preflight(act, nm)) is not None:
             return None, json.dumps(preflight, ensure_ascii=False)
     touched_files = set()
     for i, op in enumerate(operations):

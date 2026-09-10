@@ -29,7 +29,7 @@ from curator import paths
 from curator.fsutil import atomic_write_text
 from curator.skill_manager_batch import _skill_manage_batch
 from curator.skill_manager_guards import (
-    _background_review_preflight, _background_review_read_before_write_guard, _background_review_write_guard,
+    _ownership_preflight, _background_review_read_before_write_guard, _ownership_write_guard,
     _containing_skills_root, _curator_consolidation_delete_guard, _is_background_review, _maybe_auto_propose_org_edit,
     _org_mirror_write_guard, _pinned_guard, _refusal as _err, _validate_delete_target)
 from curator.skill_utils import (
@@ -208,7 +208,7 @@ def _locate_for_write(name: str, action: str, not_found_suffix: str = "", *, org
         return None, _err(_skill_not_found_error(name, not_found_suffix))
     skill_dir = existing["path"]
     guard = ((org_guard and _org_mirror_write_guard(name, skill_dir, action))
-             or _background_review_write_guard(name, skill_dir, action))
+             or _ownership_write_guard(name, skill_dir, action))
     return (None, guard) if guard else (skill_dir, None)
 
 
@@ -465,10 +465,9 @@ def _record_success(action, name, result, *, file_path, absorbed_into, task_id, 
         _ledger.record_mutation(action, name, before=ledger_before if ledger_before is not None else [],
                                 after_root=_post["path"] if _post else None, evidence=_evidence)
     with suppress(Exception):
-        from curator.skill_provenance import is_background_review
         from curator.skill_usage import bump_patch, forget, record_created
-        if action == "create":
-            record_created(name, agent_created=is_background_review(), task_id=task_id, session_id=session_id)
+        if action == "create":  # every skill_manage create is agent-made ⇒ managed, so its creator may keep editing it
+            record_created(name, agent_created=True, task_id=task_id, session_id=session_id)
         elif action in {"patch", "edit", "write_file", "remove_file"}:
             bump_patch(name, action=action, task_id=task_id, session_id=session_id)
         elif action == "delete" and not result.get("_archived"):
@@ -481,7 +480,7 @@ def skill_manage(action: str, name: str, content=None, category=None, file_path=
     """Dispatch to the action handler -> JSON string. ``operations`` (atomic batch shape) overrides the flat fields."""
     if operations is not None:
         return _skill_manage_batch(operations, default_name=name or None, task_id=task_id, session_id=session_id)
-    if (preflight := _background_review_preflight(action, name)) is not None:
+    if (preflight := _ownership_preflight(action, name)) is not None:
         return json.dumps(preflight, ensure_ascii=False)
     args = dict(content=content, category=category, file_path=file_path, file_content=file_content,
                 old_string=old_string, new_string=new_string, replace_all=replace_all, absorbed_into=absorbed_into)
