@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from conftest import write_skill
+
 
 def _tc(**args):
     return {"name": "skill_manage", "arguments": json.dumps(args)}
@@ -230,3 +232,30 @@ def test_rename_summary_mixed_consolidation_and_pruning(home):
     drop_idx = next(i for i, ln in enumerate(lines) if "drop-me" in ln)
     assert merge_idx < drop_idx
     assert "merge-me → umbrella" in lines[merge_idx] and "drop-me — pruned (stale)" in lines[drop_idx]
+
+
+def _delete_call(name, absorbed_into):
+    return {"name": "skill_manage", "arguments": json.dumps({"action": "delete", "name": name, "absorbed_into": absorbed_into})}
+
+
+def test_absorbed_into_user_or_external_skill_is_a_consolidation_not_a_prune(home):
+    from curator import curator
+    # explicit visible set: the target is a user/external skill, so it is in neither before nor after (managed) sets
+    diff = curator._diff_and_classify({"dup"}, set(), [_delete_call("dup", "polish")], "", visible={"polish"})
+    assert [(e["name"], e["into"]) for e in diff.consolidated] == [("dup", "polish")] and diff.pruned == []
+    # without visibility the same declaration would have been misfiled as a prune
+    diff = curator._diff_and_classify({"dup"}, set(), [_delete_call("dup", "polish")], "", visible=set())
+    assert diff.consolidated == [] and [e["name"] for e in diff.pruned] == ["dup"]
+
+
+def test_rename_summary_uses_real_visible_skills(home, tmp_path, set_config):
+    from curator import curator, skill_usage
+    write_skill(tmp_path / "ext", "polish")
+    set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
+    write_skill(home / "skills", "dup")
+    skill_usage.mark_agent_created("dup")
+    before = {"dup"}
+    assert skill_usage.archive_skill("dup")[0]
+    summary = curator._build_rename_summary(before_names=before, after_report=skill_usage.curated_report(),
+                                            tool_calls=[_delete_call("dup", "polish")], model_final="")
+    assert "dup → polish" in summary and "pruned" not in summary

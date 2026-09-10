@@ -160,7 +160,7 @@ run_review(prompt)
 After the pass, `curator._diff_and_classify` decides for every skill that
 disappeared between the before/after `curated_report()`:
 
-1. `absorbed_into` declared at delete (authoritative): target exists → consolidated; `""` → pruned.
+1. `absorbed_into` declared at delete (authoritative): target exists — as a managed, user **or external** skill — → consolidated; `""` → pruned. A user/external target is the "already covered elsewhere" move: the managed duplicate is archived, the existing skill untouched.
 2. the model's `## Structured summary` YAML block (`consolidations:` / `prunings:`), when the named umbrella exists.
 3. the tool-call audit: a `skill_manage` call on a *different surviving or new* skill whose `file_path` (whole path component, `-`/`_` normalised) or content (word boundary) mentions the removed name.
 4. otherwise pruned (`no-evidence fallback`).

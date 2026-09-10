@@ -9,6 +9,7 @@ from contextvars import copy_context
 
 import pytest
 
+
 from conftest import write_skill
 
 VALID_SKILL_CONTENT = """\
@@ -636,3 +637,30 @@ def test_skill_manage_schema_shape(home):
     ops = SKILL_MANAGE_SCHEMA["parameters"]["properties"]["operations"]
     assert ops["items"]["properties"]["action"]["enum"] == ["create", "patch", "delete", "write_file", "remove_file"]
     assert SKILL_MANAGE_SCHEMA["parameters"]["required"] == ["operations"]
+
+
+def _bg_delete(name, absorbed_into):
+    from curator.skill_manager import skill_manage
+    from curator.skill_provenance import BACKGROUND_REVIEW, reset_current_write_origin, set_current_write_origin
+    token = set_current_write_origin(BACKGROUND_REVIEW)
+    try:
+        return json.loads(skill_manage(action="delete", name=name, absorbed_into=absorbed_into))
+    finally:
+        reset_current_write_origin(token)
+
+
+def test_background_pass_can_archive_a_managed_duplicate_into_an_external_skill(home, tmp_path, set_config):
+    """The 'already covered elsewhere' move: archive the managed copy, never touch the existing skill."""
+    from curator import skill_usage
+    from curator.skill_manager import _create_skill
+    real = write_skill(tmp_path / "ext", "polish", body="# Polish\n\nOriginal.")
+    set_config({"skills": {"external_dirs": [str(tmp_path / "ext")]}})
+    _create_skill("polish-lite", "---\nname: polish-lite\ndescription: a narrower copy of polish\n---\n\n# Polish lite\n")
+    skill_usage.mark_agent_created("polish-lite")
+    r = _bg_delete("polish-lite", "polish")
+    assert r["success"] is True and r.get("_archived") is True and "absorbed into 'polish'" in r["message"]
+    assert not (home / "skills" / "polish-lite").exists() and (home / "skills" / ".archive" / "polish-lite" / "SKILL.md").exists()
+    assert (real / "SKILL.md").read_text(encoding="utf-8").endswith("Original.\n")
+    # and the reverse is refused: the pass may not archive the external skill itself
+    r = _bg_delete("polish", "polish-lite")
+    assert r["success"] is False and "external" in r["error"]

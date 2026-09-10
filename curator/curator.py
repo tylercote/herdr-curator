@@ -286,7 +286,7 @@ CURATOR_REVIEW_PROMPT = (
     "run. You MAY still consolidate it into an umbrella — but only because "
     "the curator rewrites cron job skill references to follow consolidations; "
     "never simply prune it.\n"
-    "4. DO NOT use usage counters as a reason to skip consolidation. The "
+    "5. DO NOT use usage counters as a reason to skip consolidation. The "
     "counters are new and often mostly zero. Judge overlap on CONTENT, "
     "not on use_count. 'use=0' is not evidence a skill is valuable; it's "
     "absence of evidence either way. Corollary: 'use=0' is ALSO not a "
@@ -294,7 +294,7 @@ CURATOR_REVIEW_PROMPT = (
     "unless it is at least 30 days old (check last_activity / created date) "
     "AND its content is genuinely obsolete or fully absorbed elsewhere — a "
     "recently-created skill simply may not have had its trigger come up yet.\n"
-    "5. DO NOT reject consolidation on the grounds that 'each skill has "
+    "6. DO NOT reject consolidation on the grounds that 'each skill has "
     "a distinct trigger'. Pairwise distinctness is the wrong bar. The "
     "right bar is: 'would a human maintainer write this as N separate "
     "skills, or as one skill with N labeled subsections?' When the "
@@ -310,7 +310,18 @@ CURATOR_REVIEW_PROMPT = (
     "serve? Would a maintainer name that class and write one skill for "
     "it?' If yes, pick (or create) the umbrella and absorb the siblings "
     "into it.\n"
-    "3. Three ways to consolidate — use the right one per cluster:\n"
+    "3. Before building ANY umbrella, check skills_list for a user or "
+    "external skill that already covers the class (skill_view it to be "
+    "sure). The library the user hand-wrote or installed is the ground "
+    "truth; the curator must never grow a parallel copy of it.\n"
+    "4. Four ways to consolidate — use the right one per cluster:\n"
+    "   d. ALREADY COVERED ELSEWHERE — a user or external skill already "
+    "provides what a managed skill (or a would-be umbrella) does. Do NOT "
+    "create or patch anything: archive the redundant managed skill with "
+    "skill_manage action=delete absorbed_into=<that existing skill>. The "
+    "existing skill is never modified; the archive is recorded as a "
+    "consolidation into it. This is the PREFERRED move whenever it applies "
+    "— prefer it over (a), (b) and (c).\n"
     "   a. MERGE INTO EXISTING UMBRELLA — one skill in the cluster is "
     "already broad enough to be the umbrella (example: `pr-triage-"
     "salvage` for the PR review cluster). Patch it to add a labeled "
@@ -358,11 +369,11 @@ CURATOR_REVIEW_PROMPT = (
     "   • archive the entire original skill package unchanged.\n"
     "Never leave archived/demoted instructions pointing at files that were "
     "left behind under the old skill directory.\n"
-    "4. Also flag skills whose NAME is too narrow (contains a PR number, "
+    "5. Also flag skills whose NAME is too narrow (contains a PR number, "
     "a feature codename, a specific error string, an 'audit' / "
     "'diagnosis' / 'salvage' session artifact). These almost always "
     "belong as a subsection or support file under a class-level umbrella.\n"
-    "5. Iterate. After one consolidation round, scan the remaining set "
+    "6. Iterate. After one consolidation round, scan the remaining set "
     "and look for the NEXT umbrella opportunity. Don't stop after 3 "
     "merges.\n\n"
     "Your toolset:\n"
@@ -463,13 +474,24 @@ def _find_reference(args: Dict[str, Any], needles: Set[str]) -> Optional[str]:
     return None
 
 
+def _visible_skill_names() -> Set[str]:
+    """Every skill the pass could see — managed, user and external — so an ``absorbed_into`` that
+    names an existing user/external skill classifies as a consolidation, not a prune."""
+    try:
+        from curator.skills_tool import _find_all_skills
+        return {s["name"] for s in _find_all_skills()}
+    except Exception:
+        logger.debug("visible skill names unavailable", exc_info=True)
+        return set()
+
+
 def _classify_removed_skills(removed: List[str], added: List[str], after_names: Set[str],
-                             tool_calls: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+                             tool_calls: List[Dict[str, Any]], visible: Optional[Set[str]] = None) -> Dict[str, List[Dict[str, Any]]]:
     """Split ``removed`` into consolidated vs pruned via tool-call evidence (earliest match wins)."""
     consolidated: List[Dict[str, Any]] = []
     pruned: List[Dict[str, Any]] = []
     parsed_calls = [a for a in (_skill_manage_args(tc, raw_fallback=True) for tc in tool_calls or []) if a is not None]
-    destinations = set(after_names) | set(added or [])
+    destinations = set(after_names) | set(added or []) | set(visible or ())
     for name in filter(None, removed):
         needles = {name, name.replace("-", "_"), name.replace("_", "-")}
         for args in parsed_calls:
@@ -566,12 +588,15 @@ class _RunDiff(NamedTuple):
     pruned: List[Dict[str, Any]]
 
 
-def _diff_and_classify(before_names: Set[str], after_names: Set[str], tool_calls: List[Dict[str, Any]], model_final: str) -> _RunDiff:
+def _diff_and_classify(before_names: Set[str], after_names: Set[str], tool_calls: List[Dict[str, Any]], model_final: str,
+                       visible: Optional[Set[str]] = None) -> _RunDiff:
     removed, added = sorted(before_names - after_names), sorted(after_names - before_names)
+    visible = _visible_skill_names() if visible is None else visible
+    destinations = set(after_names) | set(added) | visible
     classification = _reconcile_classification(
         removed=removed,
-        heuristic=_classify_removed_skills(removed=removed, added=added, after_names=after_names, tool_calls=tool_calls),
-        model_block=_parse_structured_summary(model_final), destinations=set(after_names) | set(added),
+        heuristic=_classify_removed_skills(removed=removed, added=added, after_names=after_names, tool_calls=tool_calls, visible=visible),
+        model_block=_parse_structured_summary(model_final), destinations=destinations,
         absorbed_declarations=_extract_absorbed_into_declarations(tool_calls),
     )
     return _RunDiff(after_names, removed, added, classification["consolidated"], classification["pruned"])

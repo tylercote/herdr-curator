@@ -446,3 +446,10 @@ def test_curator_slot_is_canonical_aux_task(cur):
     from curator.config import DEFAULT_CONFIG
     slot = DEFAULT_CONFIG["auxiliary"]["curator"]
     assert slot["provider"] == "auto" and slot["model"] == "" and slot["timeout"] > 0
+
+
+def test_review_prompt_prefers_archiving_duplicates_of_user_and_external_skills(cur):
+    text = cur.CURATOR_REVIEW_PROMPT
+    assert "ALREADY COVERED ELSEWHERE" in text and "absorbed_into=<that existing skill>" in text
+    assert "owner=managed" in text and "never create an umbrella whose" in text
+    assert text.index("Before building ANY umbrella") < text.index("Four ways to consolidate")
