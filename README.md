@@ -76,7 +76,8 @@ tree instead (`<home>/skills`, `<home>/config.json`).
 Hand-written skills are safe: curation is opt-in per skill, not per directory. A skill
 is only touched once `created_by: agent` is on its `.usage.json` record — the curator
 writes that for skills it creates, and `curator adopt <name>` is the only way an
-existing one crosses over. Everything else shows up under `curator status` as
+existing one crosses over (`curator unadopt <name>` hands it back, keeping its
+counters). Everything else shows up under `curator status` as
 unmanaged and is never staled or archived. To point it at another tree:
 
 ```sh
@@ -109,6 +110,7 @@ curator status            curator run [--dry-run] [--consolidate] [--background]
 curator usage [--json]    curator pause | resume
 curator pin <s>           curator unpin <s>
 curator adopt <s>...      curator adopt --all-unmanaged [--dry-run] [--yes]
+curator unadopt <s>...
 curator list-unmanaged    curator list-archived
 curator archive <s>       curator restore <s>       curator prune [--days N]
 curator backup            curator rollback [--list | --id <snap> | <ledger-entry-id>]
@@ -120,7 +122,7 @@ curator purge [--days N] [--dry-run]
 
 ## Skills TUI
 
-`curator skills` (Herdr: `curator.skills`, `prefix+shift+s` above) is a checklist — `[✓]` = enabled, persisted to `skills.disabled` (or `skills.platform_disabled.<platform>` with `--platform`), essential skills never disableable, `c` toggles a whole category — with the curator's view of each skill: managed/pinned flags, lifecycle state, use/view/patch counts. Keys: `space` toggle · `Enter` view · `e` edit in `$EDITOR` (the change is ledgered as `actor=user` and counted as a patch, so it is rollback-able) · `p` pin · `a` adopt · `x` archive · `r` restore · `/` filter · `?` help. Scriptable: `curator skills --list [--json]`, `curator skills enable|disable <names>`.
+`curator skills` (Herdr: `curator.skills`, `prefix+shift+s` above) is a checklist — `[✓]` = enabled, persisted to `skills.disabled` (or `skills.platform_disabled.<platform>` with `--platform`), essential skills never disableable, `c` toggles a whole category — with the curator's view of each skill: managed/pinned flags, lifecycle state, use/view/patch counts. Keys: `space` toggle · `Enter` view · `e` edit in `$EDITOR` (the change is ledgered as `actor=user` and counted as a patch, so it is rollback-able) · `p` pin · `a` adopt · `A` unadopt · `x` archive · `r` restore · `/` filter · `?` help. Scriptable: `curator skills --list [--json]`, `curator skills enable|disable <names>`.
 
 ## Telemetry from your agents
 

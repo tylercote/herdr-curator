@@ -495,6 +495,28 @@ def test_adopt_preserves_the_inactivity_clock(home):
     assert adopt_skill("legacy") == (True, "'legacy' is already curator-managed")
 
 
+def test_unadopt_clears_only_the_marker(home):
+    from curator import skill_usage as u
+    skills_dir = home / "skills"
+    write_skill(skills_dir, "legacy")
+    _seed_usage(skills_dir, {"legacy": {
+        "created_by": "agent", "use_count": 5, "patch_count": 7, "pinned": True,
+        "last_used_at": "2026-04-29T00:00:00+00:00", "created_at": "2026-04-28T00:00:00+00:00"}})
+    assert u.owner("legacy") == u.OWNER_MANAGED
+    ok, msg = u.unadopt_skill("legacy")
+    assert ok is True and "released" in msg
+    rec = u.get_record("legacy")
+    assert rec["created_by"] is None and rec["use_count"] == 5 and rec["patch_count"] == 7 and rec["pinned"] is True
+    assert rec["last_used_at"] == "2026-04-29T00:00:00+00:00"
+    assert u.owner("legacy") == u.OWNER_USER and not u.is_curator_managed("legacy")
+    assert "legacy" in u.list_unmanaged_skill_names()
+    assert u.unadopt_skill("legacy") == (True, "'legacy' is not curator-managed")
+    assert u.unadopt_skill("missing") == (False, "skill 'missing' not found")
+    assert u.unadopt_skill("") == (False, "no skill name given")
+    # round-trips: adopt -> unadopt -> adopt
+    assert u.adopt_skill("legacy")[0] and u.is_curator_managed("legacy")
+
+
 @pytest.mark.parametrize("kind", ["external", "missing"])
 def test_adopt_refuses_skills_the_user_does_not_own(home, tmp_path, set_config, kind):
     from curator.skill_usage import adopt_skill, load_usage

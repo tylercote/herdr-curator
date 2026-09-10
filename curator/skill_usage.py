@@ -221,6 +221,26 @@ def adopt_skill(skill_name: str) -> Tuple[bool, str]:
     return False, f"could not mark '{skill_name}' as curator-managed"
 
 
+def unadopt_skill(skill_name: str) -> Tuple[bool, str]:
+    """Reverse of :func:`adopt_skill`: clears ``created_by`` so the skill reads as ``user`` again.
+    Telemetry counters, pin and lifecycle state are left alone."""
+    if not skill_name:
+        return False, "no skill name given"
+    skill_dir = _find_skill_dir(skill_name)
+    if skill_dir is None:
+        if _find_external_skill_dir(skill_name) is not None:
+            return False, f"'{skill_name}' lives in skills.external_dirs and was never curator-managed"
+        return False, f"skill '{skill_name}' not found"
+    if is_external_skill_path(skill_dir):
+        return False, _external_read_only_message(skill_name)
+    if not is_curator_managed(skill_name):
+        return True, f"'{skill_name}' is not curator-managed"
+    _set_field(skill_name, "created_by", None)
+    if not is_curator_managed(skill_name):
+        return True, f"released '{skill_name}' from curator management (now a user skill; counters kept)"
+    return False, f"could not clear the curator-managed marker on '{skill_name}'"
+
+
 # --- Sidecar I/O ---------------------------------------------------------------
 def _empty_record() -> Dict[str, Any]:
     return {"created_by": None, "use_count": 0, "view_count": 0, "last_used_at": None, "last_viewed_at": None,

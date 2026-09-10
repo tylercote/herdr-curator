@@ -33,7 +33,7 @@ def test_all_subcommands_registered(home):
     parser = argparse.ArgumentParser(prog="curator")
     cli.register_cli(parser)
     names = {n for n, *_ in cli._SUBCOMMANDS}
-    assert names == {"status", "usage", "run", "pause", "resume", "pin", "unpin", "list-unmanaged", "adopt", "restore",
+    assert names == {"status", "usage", "run", "pause", "resume", "pin", "unpin", "list-unmanaged", "adopt", "unadopt", "restore",
                      "list-archived", "archive", "prune", "backup", "rollback", "ledger", "purge"}
     args = parser.parse_args(["archive", "my-skill"])
     assert args.skill == "my-skill" and args.func.__name__ == "_cmd_archive"
@@ -43,6 +43,8 @@ def test_all_subcommands_registered(home):
     assert args.func is cli._cmd_adopt and args.all_unmanaged is True and args.dry_run is True and args.skill == []
     named = parser.parse_args(["adopt", "alpha", "beta"])
     assert named.skill == ["alpha", "beta"] and named.all_unmanaged is False
+    released = parser.parse_args(["unadopt", "alpha", "beta"])
+    assert released.skill == ["alpha", "beta"] and released.func is cli._cmd_unadopt
     args = parser.parse_args(["usage", "--sort", "recent", "--owner", "external", "--json"])
     assert args.func is cli._cmd_usage and args.sort == "recent" and args.owner == "external" and args.json is True
     args = parser.parse_args(["run", "--dry-run", "--consolidate", "--background"])
@@ -291,6 +293,20 @@ def test_adopt_paths(home, monkeypatch):
     rc, out = _run(cli._cmd_adopt, _ns(skill=[], all_unmanaged=True, dry_run=False, yes=True))
     assert rc == 0 and "no unmanaged skills to adopt" in out
     rc, out = _run(cli._cmd_adopt, _ns(skill=["missing"], all_unmanaged=False, dry_run=False, yes=False))
+    assert rc == 1 and "not found" in out
+
+
+def test_unadopt_paths(home):
+    from curator import cli, skill_usage
+    skills = home / "skills"
+    write_skill(skills, "a")
+    write_skill(skills, "b")
+    skill_usage.adopt_skill("a")
+    assert _run(cli._cmd_unadopt, _ns(skill=[]))[0] == 1
+    rc, out = _run(cli._cmd_unadopt, _ns(skill=["a", "b"]))
+    assert rc == 0 and "released 'a'" in out and "'b' is not curator-managed" in out and "released 2/2" in out
+    assert not skill_usage.is_curator_managed("a")
+    rc, out = _run(cli._cmd_unadopt, _ns(skill=["missing"]))
     assert rc == 1 and "not found" in out
 
 

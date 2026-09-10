@@ -178,6 +178,10 @@ def test_controller_toggle_pin_adopt_archive_restore(ctrl, home):
     assert ctrl.current()["enabled"] is True
     ctrl.handle_key("a")
     assert ctrl.current()["managed"] is True
+    ctrl.handle_key("A")
+    assert ctrl.current()["managed"] is False and not skill_usage.is_curator_managed(ctrl.current()["name"])
+    ctrl.handle_key("a")
+    assert ctrl.current()["managed"] is True
     ctrl.handle_key("p")
     assert ctrl.current()["pinned"] is True and "pinned" in ctrl.status
     ctrl.handle_key("x")

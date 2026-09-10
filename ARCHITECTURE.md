@@ -106,6 +106,9 @@ autonomous curation touch this?". Only two writers set it to `agent`:
 - `skill_manage(action=create)` running under the `background_review` write origin (the LLM pass), and
 - `curator adopt` (a user declaration; the inactivity clock is *not* reset).
 
+`curator unadopt` is the inverse: it sets the marker back to `None` and touches nothing
+else, so the skill becomes `user` again with its counters, pin and state intact.
+
 Foreground creates leave it `None`; pre-marker records have no key. Both are
 **unmanaged**: curation-eligible but invisible to transitions, listed by
 `list-unmanaged`, and refused by the fork's ownership guard until adopted.
@@ -195,7 +198,7 @@ SkillsModel   rows() = skill_usage.usage_report() ⊕ skills_tool._find_all_skil
               ⊕ .archive/ names  → {name, category, description, provenance, state, pinned, managed,
               enabled, counts, last_activity_at, path}
               set_enabled / toggle_enabled / set_category_enabled (a category is enabled unless
-              ALL its skills are disabled) · adopt / pin / archive / restore (same rules
+              ALL its skills are disabled) · adopt / unadopt / pin / archive / restore (same rules
               as the CLI, ledger actor=user) · view() · edit()
 Controller    curses-free key handling (list / filter / view / help modes) + render_lines(width, height)
 run_tui       curses loop: paint render_lines, decode keys, suspend curses around $EDITOR

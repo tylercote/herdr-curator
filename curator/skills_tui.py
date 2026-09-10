@@ -6,7 +6,7 @@ with essential skills never disableable and whole categories toggleable.
 
 Plugin additions on top of that checklist: the same screen shows curator
 state (managed / pinned / stale / archived, usage counters), and offers the
-lifecycle verbs (pin, adopt, archive, restore), a pager (``Enter``) and
+lifecycle verbs (pin, adopt, unadopt, archive, restore), a pager (``Enter``) and
 ``$EDITOR`` on ``SKILL.md`` (``e``). An edit that changes the file is ledgered
 as ``actor=user`` and counted as a patch, so hand edits are rollback-able too.
 
@@ -152,6 +152,10 @@ class SkillsModel:
         from curator import skill_usage
         return skill_usage.adopt_skill(name)
 
+    def unadopt(self, name: str) -> Tuple[bool, str]:
+        from curator import skill_usage
+        return skill_usage.unadopt_skill(name)
+
     def pin(self, name: str, pinned: bool) -> Tuple[bool, str]:
         from curator import skill_usage
         if not skill_usage.is_agent_created(name):
@@ -232,7 +236,7 @@ _HELP = [
     "  ↑/k ↓/j  move        PgUp/PgDn  page       g/G  top/bottom",
     "  space    enable/disable this skill         c    enable/disable its whole category",
     "  Enter/v  view SKILL.md (pager)             e    edit SKILL.md in $EDITOR (ledgered)",
-    "  p        pin/unpin   a  adopt   x  archive   r  restore",
+    "  p        pin/unpin   a  adopt   A  unadopt   x  archive   r  restore",
     "  /        filter      Esc clear filter       ?   this help       q  quit", "",
     "Legend: [✓]/[ ] enabled · M managed · P pinned · state active/stale/archived · use/view/patch counts",
 ]
@@ -326,6 +330,8 @@ class Controller:
             self._act(self.model.pin(cur["name"], not cur["pinned"]))
         elif key == "a":
             self._act(self.model.adopt(cur["name"]))
+        elif key == "A":
+            self._act(self.model.unadopt(cur["name"]))
         elif key == "x":
             self._act(self.model.archive(cur["name"]))
         elif key == "r":

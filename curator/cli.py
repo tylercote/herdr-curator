@@ -255,6 +255,22 @@ def _cmd_adopt(args) -> int:
     return 1 if failed else 0
 
 
+def _cmd_unadopt(args) -> int:
+    from curator import skill_usage
+    names = list(getattr(args, "skill", None) or [])
+    if not names:
+        print("curator: name a skill to release from curator management")
+        return 1
+    failed = 0
+    for n in names:
+        ok, msg = skill_usage.unadopt_skill(n)
+        print(f"curator: {msg}")
+        failed += not ok
+    if len(names) > 1:
+        print(f"curator: released {len(names) - failed}/{len(names)}")
+    return 1 if failed else 0
+
+
 def _as_user(fn, skill: str) -> int:
     from curator import skill_ledger
     tok = skill_ledger.set_ledger_actor("user")
@@ -534,6 +550,8 @@ _SUBCOMMANDS = (
      _arg("--all-unmanaged", **_STORE_TRUE, help="Adopt every curation-eligible skill that has no provenance marker"),
      _arg("--dry-run", **_STORE_TRUE, help="List what would be adopted without writing anything"),
      _arg("--yes", **_STORE_TRUE, help="Skip the confirmation prompt for --all-unmanaged")),
+    ("unadopt", "Release managed skills back to user ownership (clears the marker; keeps telemetry)", _cmd_unadopt,
+     _arg("skill", nargs="+", help="Skill name(s) to release")),
     ("restore", "Restore an archived skill", _cmd_restore, _SKILL),
     ("list-archived", "List archived skills", _cmd_list_archived),
     ("archive", "Manually archive a skill (move to .archive/)", _cmd_archive, _SKILL),
