@@ -2,6 +2,7 @@
 
     curator <verb> ...             the curator CLI (status, run, pin, ...)
     curator skills [...]           the skills TUI: enable/disable, browse, edit
+    curator setup [--yes]          interactive first-run flow: skills tree, hooks, pass runner + model, schedule
     curator mcp-serve ...          skills toolset over MCP for the consolidation fork
     curator startup                Herdr [[startup]] hook: notices, hook reconcile, spawn daemon
     curator daemon [--interval S] [--first-idle S]  the 60 s scheduler tick loop (single instance); runs every pass in-process
@@ -18,7 +19,7 @@ from __future__ import annotations
 import sys
 from typing import List, Optional
 
-_EXTRA = ("skills", "mcp-serve", "startup", "daemon", "tick", "action", "pane", "bump", "hooks", "hook")
+_EXTRA = ("skills", "setup", "mcp-serve", "startup", "daemon", "tick", "action", "pane", "bump", "hooks", "hook")
 
 
 def _usage() -> str:
@@ -40,6 +41,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if verb == "skills":
         from curator.skills_tui import cli_main as skills_main
         return skills_main(rest)
+    if verb == "setup":
+        from curator.setup_wizard import setup_main
+        return setup_main(rest)
     if verb == "hooks":
         from curator.integrations import hooks_main
         return hooks_main(rest)

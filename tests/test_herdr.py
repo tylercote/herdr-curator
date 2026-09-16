@@ -350,15 +350,18 @@ def test_startup_survives_reconcile_failure(herdr_env, monkeypatch):
     assert any("hook setup failed: boom" in c[4] for c in fake.calls if c[:2] == ["notification", "show"])
 
 
-def test_setup_pane_installs_and_shows_status(herdr_env, monkeypatch, capsys, tmp_path):
-    from curator import integrations
+def test_setup_pane_runs_the_wizard(herdr_env, monkeypatch, capsys):
+    """The `setup` pane is the interactive first-run flow; the pane waits for a key afterwards."""
+    from curator import setup_wizard
     h = herdr_env["herdr"]
-    (tmp_path / ".pi" / "agent").mkdir(parents=True)
-    monkeypatch.setattr(integrations.shutil, "which", lambda name: None)
-    monkeypatch.setattr(h, "_wait_for_key", lambda: None)
-    assert h.pane("setup") == 0
-    out = capsys.readouterr().out
-    assert "pi:       installed" in out and "launcher:" in out and integrations.pi_extension_path().exists()
+    ran = []
+    monkeypatch.setattr(setup_wizard.Wizard, "run_wizard", lambda self: ran.append(1) or 0)
+    waited = []
+    monkeypatch.setattr(h, "_wait_for_key", lambda: waited.append(1))
+    assert h.pane("setup") == 0 and ran == [1] and waited == [1]
+    # an aborted wizard (Ctrl-C at a prompt raises SystemExit) is reported, not propagated
+    monkeypatch.setattr(setup_wizard.Wizard, "run_wizard", lambda self: (_ for _ in ()).throw(SystemExit("aborted")))
+    assert h.pane("setup") == 1 and "aborted" in capsys.readouterr().out
 
 
 def test_daemon_and_startup_do_nothing_lasting_outside_herdr(herdr_env, monkeypatch, capsys):

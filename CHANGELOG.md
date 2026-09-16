@@ -31,6 +31,11 @@ First release intended for a second machine.
   no `HERDR_ENV` runs one tick and exits.
 - After a plugin reinstall the daemon re-execs itself from the new checkout.
 
+### Setup
+- `curator setup` (Herdr action `curator.setup`): interactive first-run flow — harness detection,
+  skills tree, hook hosts, the harness and model for the automated pass (models listed per
+  harness, optional live check for Claude Code), schedule. `--yes` accepts every default.
+
 ### Docs
 - Herdr has no `plugin update`: reinstall is the upgrade path. Removal steps are documented in
   order, including that archived skills are deleted with the state dir.

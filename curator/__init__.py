@@ -20,6 +20,7 @@ Package map:
     notices               first-run / recent-run notices
     llm_review            the consolidation pass on headless coding agents
     skills_tui            `curator skills`: enable/disable, browse, edit
+    setup_wizard          `curator setup`: interactive first-run flow (harness detection, model discovery)
     herdr                 Herdr host layer: startup, daemon, actions, panes
     integrations          telemetry hooks for host agents (claude / codex / opencode / pi)
 """

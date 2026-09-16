@@ -111,8 +111,8 @@ command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action c
 
 [[actions]]
 id = "setup"
-title = "Curator: setup telemetry hooks"
-description = "Install/refresh the hooks that let Claude Code, Codex, OpenCode and pi report skill loads (runs automatically at session start; this forces it now)."
+title = "Curator: setup"
+description = "Interactive setup: skills tree, telemetry hooks for Claude Code / Codex / OpenCode / pi, the harness and model that run the automated pass, schedule."
 contexts = ["global", "workspace", "pane"]
 command = ["sh", "-c", "exec python3 \"$HERDR_PLUGIN_ROOT/bin/curator\" action setup"]
 

@@ -359,6 +359,7 @@ _CONSOLE_MENU = [
     ("8", "ledger", ["ledger"]), ("9", "rollback --list", ["rollback", "--list"]),
     ("h", "hooks status (claude / codex / opencode / pi telemetry)", ["hooks", "status"]),
     ("H", "hooks install", ["hooks", "install"]),
+    ("S", "setup wizard (skills tree, hooks, pass runner + model, schedule)", ["setup"]),
 ]
 
 
@@ -384,17 +385,23 @@ def _pane_console() -> int:
                 from curator.integrations import hooks_main
                 hooks_main(argv[1:])
                 continue
+            if argv[:1] == ["setup"]:
+                from curator.setup_wizard import setup_main
+                setup_main(argv[1:])
+                continue
             cli.cli_main(argv)
         except SystemExit as e:
             print(f"curator: exited {e.code}")
 
 
 def _pane_setup() -> int:
-    """Install telemetry hooks for every detected host now, then show status."""
-    from curator.integrations import hooks_main
-    rc = hooks_main(["install"])
-    print()
-    hooks_main(["status"])
+    """The interactive setup flow (skills tree, hooks, pass runner + model, schedule) in an overlay pane."""
+    from curator.setup_wizard import Wizard
+    try:
+        rc = Wizard().run_wizard()
+    except SystemExit as e:
+        print(e)
+        rc = 1
     _wait_for_key()
     return rc
 

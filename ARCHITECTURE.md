@@ -211,7 +211,17 @@ if the bytes changed records a ledger `edit` entry with `actor=user` and bumps
 `patch_count` — so a hand edit is rollback-able with `curator rollback <id>`
 exactly like an agent patch.
 
-## 8c. Telemetry from host agents (`integrations.py`)
+## 8c. Setup flow (`setup_wizard.py`)
+
+`curator setup` is a plain `input()` flow (no curses) so it works in any pane or shell:
+detect harnesses (`which` + `--version`) → skills tree → hook hosts → pass runner + model →
+schedule → summary → `config.update_user_config` + `hooks_main(["install", …])`. Model discovery
+is per harness: `opencode models` is authoritative; Claude Code has no list command, so the tier
+aliases are offered with an optional one-call `claude -p` verification; Codex and pi are hook
+hosts only, not runners. `which`, `subprocess.run` and `input` are injected, so the tests drive
+the whole flow with scripted answers.
+
+## 8d. Telemetry from host agents (`integrations.py`)
 
 The MCP server bumps telemetry for the consolidation fork, but day-to-day use
 happens in Claude Code, Codex, OpenCode or pi, none of which know the curator exists.

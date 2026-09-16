@@ -45,15 +45,27 @@ command = "curator.status"
 description = "curator status"
 
 # The rest, if you want single keys for them:
-# command = "curator.setup"        # (re)install telemetry hooks in your agents now
+# command = "curator.setup"        # the setup flow: hooks, pass runner + model, schedule
 # command = "curator.run"          # prune-only pass now
 # command = "curator.dry-run"      # preview, mutates nothing
 # command = "curator.consolidate"  # prune + LLM umbrella-building pass
 # command = "curator.report"       # last REPORT.md
 ```
 
-Then `herdr config check && herdr server reload-config`. Ctrl-click any
-`file://…/logs/curator/<stamp>/REPORT.md` path in a pane to open that report.
+Then `herdr config check && herdr server reload-config`, and run the setup flow once:
+
+```sh
+curator setup            # or the Herdr action `curator.setup`
+```
+
+It detects the harnesses on the machine (Claude Code, Codex, OpenCode, pi), confirms the skills
+tree, picks which hosts get telemetry hooks and installs them, lets you choose the harness that
+runs the automated pass **and a model that harness actually offers** (`opencode models` for
+OpenCode; the `fable`/`opus`/`sonnet`/`haiku` aliases for Claude Code with an optional one-call
+live check), and tunes the schedule. Every answer has a default, `curator setup --yes` takes them
+all, and nothing is written until you confirm the summary.
+
+Ctrl-click any `file://…/logs/curator/<stamp>/REPORT.md` path in a pane to open that report.
 
 ## Where things live
 
@@ -119,6 +131,7 @@ The curator is **inactivity-triggered, not a cron job**:
 ## CLI
 
 ```sh
+curator setup [--yes]     # interactive first-run flow
 curator status            curator run [--dry-run] [--consolidate] [--background]
 curator usage [--json]    curator pause | resume
 curator pin <s>           curator unpin <s>
@@ -143,7 +156,7 @@ The curator only learns anything if the agent that loads skills tells it. **That
 automatic**: every Herdr session start reconciles the hooks — for each harness it finds on the
 machine it installs (or refreshes) a hook, and it registers the harness's own skill directory so
 loads of skills living there are counted too. A Herdr notification tells you when it changed
-something. `Curator: setup telemetry hooks` (`curator.setup`) forces the same thing on demand.
+something. `curator setup` (Herdr: `curator.setup`) walks through it interactively, and `curator hooks install` forces it on demand.
 
 | host | what gets installed | what it reports |
 |---|---|---|
