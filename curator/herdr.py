@@ -180,8 +180,11 @@ def startup(*, spawn_daemon: bool = True) -> int:
         changed = [f"hook setup failed: {e}"]
     if changed:
         notify(NOTIFY_TITLE, body="\n".join(changed))
-    if spawn_daemon:
+    if spawn_daemon and inside_herdr():
         _spawn_detached(["daemon", "--first-idle", "inf"])  # session start == fully idle
+    elif spawn_daemon:
+        print("curator: not inside Herdr (HERDR_ENV unset) — daemon not started; run `curator tick` or `curator run` by hand",
+              file=sys.stderr)
     return 0
 
 
@@ -207,8 +210,10 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _socket_present() -> bool:
+    """The daemon's reason to live. Without a socket path we can only trust ``HERDR_ENV``; a daemon
+    started from a plain shell (no Herdr at all) must not loop forever."""
     sock = os.environ.get("HERDR_SOCKET_PATH")
-    return True if not sock else Path(sock).exists()
+    return inside_herdr() if not sock else Path(sock).exists()
 
 
 def daemon(interval: float = 60.0, first_idle: float = float("inf")) -> int:

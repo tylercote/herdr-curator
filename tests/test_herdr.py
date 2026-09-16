@@ -359,3 +359,19 @@ def test_setup_pane_installs_and_shows_status(herdr_env, monkeypatch, capsys, tm
     assert h.pane("setup") == 0
     out = capsys.readouterr().out
     assert "pi:       installed" in out and "launcher:" in out and integrations.pi_extension_path().exists()
+
+
+def test_daemon_and_startup_do_nothing_lasting_outside_herdr(herdr_env, monkeypatch, capsys):
+    """`curator startup` from a plain shell must not leave a daemon looping forever, and a daemon
+    with neither a socket path nor HERDR_ENV runs exactly one tick and exits."""
+    h = herdr_env["herdr"]
+    monkeypatch.delenv("HERDR_ENV")
+    monkeypatch.delenv("HERDR_SOCKET_PATH", raising=False)
+    spawned = []
+    monkeypatch.setattr(h, "_spawn_detached", lambda args: spawned.append(args))
+    assert h.startup() == 0 and spawned == []
+    assert "not inside Herdr" in capsys.readouterr().err
+    ticks = []
+    monkeypatch.setattr(h, "tick", lambda **kw: ticks.append(kw))
+    monkeypatch.setattr(h.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("slept: daemon did not exit")))
+    assert h.daemon(interval=1) == 0 and len(ticks) == 1
