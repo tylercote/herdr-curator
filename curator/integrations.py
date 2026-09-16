@@ -107,8 +107,11 @@ def _launcher_text() -> str:
         f"# {MARK} hook launcher — managed by the plugin; host configs point here so plugin updates never change them.\n"
         "# Usage: curator-hook <host>   (JSON payload on stdin)\n"
         f"{exports}"
-        'ROOT="$(cat "$(dirname "$0")/../plugin_root" 2>/dev/null)"\n'
-        '[ -n "$ROOT" ] && [ -f "$ROOT/bin/curator" ] || exit 0   # plugin gone: stay silent\n'
+        "# Builtins only until python3 is known to exist: hooks inherit the host's PATH, which may be empty.\n"
+        'command -v python3 >/dev/null 2>&1 || exit 0                            # no python3: stay silent\n'
+        'ROOT=""\n'
+        '[ -r "${0%/*}/../plugin_root" ] && IFS= read -r ROOT < "${0%/*}/../plugin_root"\n'
+        '[ -n "$ROOT" ] && [ -f "$ROOT/bin/curator" ] || exit 0                  # plugin gone: stay silent\n'
         'exec python3 "$ROOT/bin/curator" hook "$@"\n'
     )
 

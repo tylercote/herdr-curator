@@ -287,6 +287,12 @@ def test_launcher_is_written_points_at_plugin_root_and_is_silent_when_plugin_is_
     r = subprocess.run(["sh", str(launcher), "pi"], input=json.dumps({"tool": "read", "args": {"path": f"{s}/alpha/SKILL.md"}}),
                        capture_output=True, text=True, timeout=60, env={**os.environ, "CURATOR_HOME": str(home)})
     assert r.returncode == 0 and "pi load alpha" in integ.hooks_log_path().read_text(encoding="utf-8")
+    # no python3 on PATH (hooks inherit the host's environment): exit 0, no output, nothing recorded
+    before = integ.hooks_log_path().read_text(encoding="utf-8")
+    r = subprocess.run(["/bin/sh", str(launcher), "pi"], input=json.dumps({"tool": "read", "args": {"path": f"{s}/alpha/SKILL.md"}}),
+                       capture_output=True, text=True, timeout=30, env={**os.environ, "PATH": str(tmp_path / "empty-bin")})
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == ""
+    assert integ.hooks_log_path().read_text(encoding="utf-8") == before
     # plugin gone: exit 0, no output, nothing recorded
     integ.plugin_root_file().write_text(str(tmp_path / "nowhere") + "\n", encoding="utf-8")
     r = subprocess.run(["sh", str(launcher), "pi"], input="{}", capture_output=True, text=True, timeout=30)
