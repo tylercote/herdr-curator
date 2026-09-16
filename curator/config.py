@@ -56,7 +56,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "hooks": {
         "auto": True,                 # install/refresh hooks for every detected host
         "hosts": [],                  # subset of claude/codex/opencode/pi; empty = all detected
-        "register_skill_dirs": True,  # add the hosts' native skill dirs to skills.external_dirs (read-only)
+        "register_skill_dirs": True,  # record the hosts' native skill dirs (read-only, like external_dirs) in the state dir
     },
     "curator": {
         "enabled": True,

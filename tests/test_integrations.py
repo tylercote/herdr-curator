@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from curator import paths
 from tests.conftest import write_skill
 
 
@@ -359,8 +360,9 @@ def test_register_skill_dirs_merges_dedupes_and_is_idempotent(integ, home, tmp_p
     config.update_user_config(lambda c: c.setdefault("skills", {}).update({"external_dirs": [str(tmp_path / ".pi" / "agent" / "skills"), "~/other"]}))
     added = integ.register_skill_dirs()
     assert added == ["~/.agents/skills"]
-    dirs = config.read_user_config()["skills"]["external_dirs"]
-    assert dirs == [str(tmp_path / ".pi" / "agent" / "skills"), "~/other", "~/.agents/skills"]
+    # the user's config.json is never machine-edited; registrations live in the state dir
+    assert config.read_user_config()["skills"]["external_dirs"] == [str(tmp_path / ".pi" / "agent" / "skills"), "~/other"]
+    assert json.loads(paths.registered_dirs_file().read_text(encoding="utf-8")) == ["~/.agents/skills"]
     assert integ.register_skill_dirs() == []
     assert tmp_path / ".agents" / "skills" in skill_utils.get_external_skills_dirs()
     assert integ.resolve_path(tmp_path / ".agents" / "skills" / "ext-a" / "SKILL.md") == "ext-a"

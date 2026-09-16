@@ -186,7 +186,8 @@ are deleted with it (`curator restore <name>` puts one back first). A daemon sti
 when the Herdr server does.
 
 **Skill directories.** pi and Codex read `~/.agents/skills`; OpenCode and Codex have their own
-too. Reconcile adds the ones that exist to `skills.external_dirs` — telemetry only; external
+too. Reconcile records the ones that exist in `<state>/registered_skill_dirs.json` (your `config.json`
+is never machine-edited) and treats them like `skills.external_dirs` — telemetry only; external
 skills are never staled, archived or consolidated. A skill you have *linked into* the curated
 tree (`~/.claude/skills/x -> ~/.agents/skills/x`) stays local and manageable: the link is the
 adoption.

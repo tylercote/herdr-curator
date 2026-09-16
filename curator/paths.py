@@ -30,6 +30,7 @@ telemetry, the ledger or the archive:
         snapshots/<utc-iso>/           whole-tree tar.gz + manifest.json
       logs/curator/<stamp>/            per-run run.json + REPORT.md
       bin/curator-hook, plugin_root    stable hook launcher
+      registered_skill_dirs.json       harness skill dirs found by the startup reconcile
       daemon.pid, activity.json, hooks.log
 """
 
@@ -171,3 +172,9 @@ def backups_dir() -> Path:
 
 def reports_root() -> Path:
     return state_dir() / "logs" / "curator"
+
+
+def registered_dirs_file() -> Path:
+    """Harness skill dirs the startup reconcile discovered (read-only to curation, like
+    ``skills.external_dirs``) — kept here so the user's config.json is never machine-edited."""
+    return state_dir() / "registered_skill_dirs.json"

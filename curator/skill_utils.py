@@ -13,6 +13,7 @@ line split.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -380,13 +381,23 @@ def _config_str_list(raw) -> List[str]:
     return parse_config_string_list(raw)
 
 
+def registered_skills_dirs() -> List[str]:
+    """Raw entries of ``paths.registered_dirs_file()`` (harness dirs found by the startup reconcile)."""
+    try:
+        data = json.loads(paths.registered_dirs_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [d for d in data if isinstance(d, str)] if isinstance(data, list) else []
+
+
 def get_external_skills_dirs() -> List[Path]:
-    """Validated, deduplicated ``skills.external_dirs`` (existing dirs only)."""
+    """Validated, deduplicated ``skills.external_dirs`` plus the auto-registered harness dirs
+    (existing dirs only)."""
     from curator.config import load_config_readonly
     skills_cfg = load_config_readonly().get("skills") or {}
     local = get_skills_dir().resolve()
     result: List[Path] = []
-    for entry in _config_str_list(skills_cfg.get("external_dirs")):
+    for entry in _config_str_list(skills_cfg.get("external_dirs")) + registered_skills_dirs():
         p = paths.expand_path(entry).resolve()
         if p == local or p in result:
             continue

@@ -38,8 +38,8 @@ uninstalled plugin never spams the host with errors.
 
 ``reconcile()`` is what the Herdr ``[[startup]]`` hook runs every session: write
 the launcher, install hooks for every detected host (``hooks.auto``), and
-register the harness-native skill dirs as read-only ``skills.external_dirs``
-(``hooks.register_skill_dirs``) so loads of skills that live there are counted.
+record the harness-native skill dirs in ``<state>/registered_skill_dirs.json`` — read-only,
+like ``skills.external_dirs`` (``hooks.register_skill_dirs``) — so loads of skills there are counted.
 """
 
 from __future__ import annotations
@@ -579,17 +579,17 @@ def harness_skill_dirs() -> List[Path]:
 
 
 def register_skill_dirs() -> List[str]:
-    """Add the harness skill dirs to ``skills.external_dirs`` (read-only to curation). Returns what was added."""
-    from curator.config import read_user_config, update_user_config
-    present = {paths.expand_path(e).resolve() for e in (read_user_config().get("skills") or {}).get("external_dirs") or []
-               if isinstance(e, str)}
+    """Record the harness skill dirs in ``<state>/registered_skill_dirs.json`` (read-only to
+    curation, exactly like ``skills.external_dirs``, which the user keeps by hand). Returns what was added."""
+    from curator.config import read_user_config
+    from curator.skill_utils import registered_skills_dirs
+    configured = [e for e in (read_user_config().get("skills") or {}).get("external_dirs") or [] if isinstance(e, str)]
+    known = registered_skills_dirs()
+    present = {paths.expand_path(e).resolve() for e in configured + known}
     added = [paths._display(d) for d in harness_skill_dirs() if d.resolve() not in present]
     if added:
-        def _mutate(cfg: Dict[str, Any]) -> None:
-            skills = cfg.setdefault("skills", {})
-            existing = [e for e in skills.get("external_dirs") or [] if isinstance(e, str)]
-            skills["external_dirs"] = existing + [a for a in added if a not in existing]
-        update_user_config(_mutate)
+        from curator.fsutil import atomic_json_write
+        atomic_json_write(paths.registered_dirs_file(), known + added)
     return added
 
 

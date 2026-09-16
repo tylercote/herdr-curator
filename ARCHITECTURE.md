@@ -230,8 +230,10 @@ a launcher that `exec`s `<plugin_root>/bin/curator hook <host>` where `<plugin_r
 is read from `<state>/plugin_root` — both rewritten by the `[[build]]` step and at
 every startup. A missing plugin makes the launcher `exit 0` silently. `startup`
 runs `integrations.reconcile()`: launcher, then per detected host install-or-refresh
-(`hooks.auto`, `hooks.hosts`), then `register_skill_dirs()` which adds the hosts'
-native trees (`~/.agents/skills`, `~/.codex/skills`, …) to `skills.external_dirs`.
+(`hooks.auto`, `hooks.hosts`), then `register_skill_dirs()` which records the hosts'
+native trees (`~/.agents/skills`, `~/.codex/skills`, …) in `<state>/registered_skill_dirs.json`;
+`skill_utils.get_external_skills_dirs` unions that file with `skills.external_dirs`, so the
+user's config is never machine-edited.
 A skill *linked into* the curated tree is exempt from external ownership even when
 its target sits under a registered dir (`skill_utils._local_link_targets`) — the
 link is the adoption.
