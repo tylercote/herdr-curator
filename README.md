@@ -147,7 +147,7 @@ something. `Curator: setup telemetry hooks` (`curator.setup`) forces the same th
 
 | host | what gets installed | what it reports |
 |---|---|---|
-| **Claude Code** | a `PostToolUse` hook (`Skill\|Read\|Edit\|Write`) in `~/.claude/settings.json`, merged next to your existing hooks | `Skill` invocations and reads/edits of files inside a skill dir |
+| **Claude Code** | a `PostToolUse` hook (`Skill`, `Read`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`; anchored) in `~/.claude/settings.json`, merged next to your existing hooks | `Skill` invocations and reads/edits of files inside a skill dir |
 | **Codex** | `PostToolUse` (`Bash\|Edit\|Write\|Read\|apply_patch`) + `UserPromptSubmit` entries in `~/.codex/hooks.json` | `$skill` mentions in your prompt; shell reads of files inside a skill dir (Codex has no read tool — it `cat`s SKILL.md); `apply_patch` edits and shell redirects into a skill dir. **Codex won't run a new hook until you trust it: open Codex and run `/hooks`** (or pass `--dangerously-bypass-hook-trust` to `codex exec` for automation). |
 | **OpenCode** | `~/.config/opencode/plugins/curator.ts` (`tool.execute.before/after`) | the `skill` tool, plus `read`/`edit`/`write` inside a skill dir |
 | **pi** | `~/.pi/agent/extensions/curator.ts` (`tool_execution_start/end`) | `read`/`edit`/`write` inside a skill dir — pi loads a skill by reading its `SKILL.md` |

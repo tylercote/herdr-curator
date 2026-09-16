@@ -13,7 +13,7 @@ Anything else is ignored, so a hook can never pollute ``.usage.json``.
 
 Hosts:
 
-    claude    PostToolUse hook in ~/.claude/settings.json            (Skill | Read | Edit | Write)
+    claude    PostToolUse hook in ~/.claude/settings.json            (Skill | Read | Edit | MultiEdit | Write | NotebookEdit)
     codex     PostToolUse + UserPromptSubmit in ~/.codex/hooks.json  (shell / exec / apply_patch, $skill mentions)
     opencode  plugin  ~/.config/opencode/plugins/curator.ts           (tool.execute.before/after)
     pi        extension ~/.pi/agent/extensions/curator.ts             (tool_execution_start/end)
@@ -382,7 +382,7 @@ _CODEX_TRUST_NOTE = "\n          new/changed hooks are inert until trusted: run 
 
 # Hosts whose hooks are JSON entries: {event: matcher-group fields}; ours get a "hooks" list appended.
 _JSON_HOOKS: Dict[str, Tuple[Callable[[], Path], Dict[str, Dict[str, Any]]]] = {
-    "claude": (claude_settings_path, {"PostToolUse": {"matcher": "Skill|Read|Edit|Write"}}),
+    "claude": (claude_settings_path, {"PostToolUse": {"matcher": "^(Skill|Read|Edit|MultiEdit|Write|NotebookEdit)$"}}),  # anchored: Claude Code matchers are regexes
     "codex": (codex_hooks_path, {"PostToolUse": {"matcher": "Bash|Edit|Write|Read|apply_patch|read_file"},  # Codex names its shell tool "Bash" to hooks
                                  "UserPromptSubmit": {}}),
 }
@@ -488,7 +488,10 @@ def status_json_hooks(host: str) -> Tuple[bool, str]:
     if not ours:
         return False, f"{_label(host)} not installed ({path})"
     current = hook_command(host)
-    fresh = len(ours) == len(events) and all(any(h.get("command") == current for h in e.get("hooks") or []) for e in ours)
+    fresh = len(ours) == len(events) and all(
+        any(h.get("command") == current for h in e.get("hooks") or [])
+        and all(e.get(k) == v for k, v in fields.items())  # a matcher change is a stale install too
+        for e, fields in zip(ours, events.values()))
     line = f"{_label(host)} installed{'' if fresh else ' (STALE — reinstall)'} -> {path}"
     return True, line + _CODEX_TRUST_NOTE if host == "codex" else line
 

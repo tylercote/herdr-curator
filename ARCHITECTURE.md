@@ -218,7 +218,7 @@ happens in Claude Code, Codex, OpenCode or pi, none of which know the curator ex
 `curator hooks install` drops a shim into each host it detects:
 
 ```
-Claude Code   ~/.claude/settings.json      PostToolUse  matcher Skill|Read|Edit|Write  → python3 bin/curator hook claude
+Claude Code   ~/.claude/settings.json      PostToolUse  matcher ^(Skill|Read|Edit|MultiEdit|Write|NotebookEdit)$  → curator-hook claude
 Codex         ~/.codex/hooks.json          PostToolUse  matcher Bash|Edit|Write|Read|apply_patch + UserPromptSubmit → hook codex
                                            (inert until trusted via /hooks in the Codex TUI)
 OpenCode      ~/.config/opencode/plugins/curator.ts    tool.execute.before/after       → python3 bin/curator hook opencode

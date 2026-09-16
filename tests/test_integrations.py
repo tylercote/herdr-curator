@@ -123,7 +123,7 @@ def test_claude_install_is_idempotent_and_preserves_foreign_hooks(integ):
     data = json.loads(path.read_text(encoding="utf-8"))
     post = data["hooks"]["PostToolUse"]
     ours = [e for e in post if integ._is_our_claude_entry(e)]
-    assert len(ours) == 1 and ours[0]["matcher"] == "Skill|Read|Edit|Write"
+    assert len(ours) == 1 and ours[0]["matcher"] == "^(Skill|Read|Edit|MultiEdit|Write|NotebookEdit)$"
     assert ours[0]["hooks"][0]["command"] == integ.hook_command("claude")
     assert data["model"] == "opus" and data["hooks"]["PreToolUse"] == existing["hooks"]["PreToolUse"]
     assert [e for e in post if not integ._is_our_claude_entry(e)] == existing["hooks"]["PostToolUse"]
@@ -495,3 +495,18 @@ def test_resolve_path_outside_every_skill_root_never_walks_the_trees(integ, home
     # a path under a root still consults the index (which is patched to empty here)
     assert integ.resolve_path(home / "skills" / "alpha" / "SKILL.md") is None
     assert walked == [1]
+
+
+def test_claude_status_flags_changed_matcher_as_stale_so_reconcile_refreshes_it(integ):
+    import re
+    integ.install_claude()
+    assert integ.status_claude()[0] is True and "STALE" not in integ.status_claude()[1]
+    path = integ.claude_settings_path()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    ours = next(e for e in data["hooks"]["PostToolUse"] if integ._is_our_claude_entry(e))
+    for tool in ("Skill", "Read", "Edit", "MultiEdit", "Write", "NotebookEdit"):
+        assert re.search(ours["matcher"], tool)
+    assert not re.search(ours["matcher"], "ReadOnlyThing") and not re.search(ours["matcher"], "Bash")
+    ours["matcher"] = "Skill|Read|Edit|Write"  # what 0.1 installed
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert "STALE" in integ.status_claude()[1]
