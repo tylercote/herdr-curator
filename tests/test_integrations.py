@@ -481,3 +481,15 @@ def test_install_writes_through_a_symlinked_config_file(integ, tmp_path):
     os.symlink(real_ts, plugin)
     integ._install_file("opencode", plugin)
     assert plugin.is_symlink() and integ.MARK in real_ts.read_text(encoding="utf-8")
+
+
+def test_resolve_path_outside_every_skill_root_never_walks_the_trees(integ, home, tmp_path, monkeypatch):
+    """The common case (a project file) must be decided from the roots alone."""
+    walked = []
+    monkeypatch.setattr(integ, "skill_index", lambda: walked.append(1) or {})
+    assert integ.resolve_path(tmp_path / "project" / "main.py") is None
+    assert integ.resolve_path("/etc/hosts") is None
+    assert walked == []
+    # a path under a root still consults the index (which is patched to empty here)
+    assert integ.resolve_path(home / "skills" / "alpha" / "SKILL.md") is None
+    assert walked == [1]

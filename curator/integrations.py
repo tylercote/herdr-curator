@@ -154,11 +154,37 @@ def skill_index() -> Dict[Path, str]:
     return index
 
 
+def _scan_roots() -> List[Path]:
+    """Every directory ``skill_index`` would walk — lexical and resolved — plus the real targets of
+    skills linked into the curated tree (a host may report either side of such a link)."""
+    from curator.skill_utils import _local_link_targets
+    from curator.skills_tool import _skill_search_dirs
+    roots: List[Path] = []
+    for d in _skill_search_dirs()[1]:
+        for candidate in (Path(d).absolute(), Path(d).resolve()):
+            if candidate not in roots:
+                roots.append(candidate)
+    roots.extend(t for t in _local_link_targets() if t not in roots)
+    return roots
+
+
+def _under_any(p: Path, roots: List[Path]) -> bool:
+    return any(p == r or r in p.parents for r in roots)
+
+
 def resolve_path(path: Any) -> Optional[str]:
-    """Skill name for a file inside a known skill dir — SKILL.md itself or any support file."""
+    """Skill name for a file inside a known skill dir — SKILL.md itself or any support file.
+
+    Cheap early-out first: hooks fire for every Read/Edit/Write the host makes, and almost all of
+    them are project files, so a path under none of the scanned roots must cost a few stats, not
+    a walk of every skill tree."""
     try:
-        p = paths.expanduser(str(path)).resolve()
+        lexical = paths.expanduser(str(path)).absolute()
+        p = lexical.resolve()
     except Exception:
+        return None
+    roots = _scan_roots()
+    if not roots or not (_under_any(lexical, roots) or _under_any(p, roots)):
         return None
     index = skill_index()
     if not index:
