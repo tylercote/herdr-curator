@@ -167,6 +167,13 @@ re-trust an unchanged command, and uninstalling the plugin never spams your harn
 errors. Host config files are rewritten in place: existing hooks, other keys, file mode and a
 symlink (dotfile managers) are all preserved — only our tagged entries are added or removed.
 
+**Dotfile managers.** If `~/.claude/settings.json` or `~/.codex/hooks.json` is managed by
+chezmoi, yadm or a dotfiles repo, our entry shows up as drift and `chezmoi apply` strips it; the
+next Herdr server start puts it back. Either add the entry to your dotfiles source (`curator hooks
+status` prints the exact command, and it is stable across upgrades), or set `hooks.auto` to
+`false` in the plugin config and run `curator hooks install` once by hand. A symlinked config
+file is written through, so the link itself survives.
+
 **Upgrade.** Herdr (0.8.x) has no `plugin update`; run `herdr plugin install tylercote/herdr-curator`
 again (a linked checkout just needs `git pull`). The launcher is refreshed at the next Herdr
 server start. A daemon already running keeps the old code until Herdr restarts.
