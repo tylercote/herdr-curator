@@ -165,6 +165,9 @@ def test_file_installers_render_bin_path_and_only_remove_their_own(integ, tmp_pa
         target.write_text("export const Mine = 1\n", encoding="utf-8")
         assert "not ours" in integ._uninstall_file(host, target) and target.exists()
         assert integ._status_file(host, target)[0] is False
+        with pytest.raises(RuntimeError, match="not ours"):  # install is as careful as uninstall
+            integ._install_file(host, target)
+        assert target.read_text(encoding="utf-8") == "export const Mine = 1\n"
 
 
 def test_opencode_shim_hooks_and_pi_shim_events_are_present(integ):
@@ -473,7 +476,7 @@ def test_install_writes_through_a_symlinked_config_file(integ, tmp_path):
     # file installers too
     plugin = integ.opencode_plugin_path()
     real_ts = tmp_path / "dotfiles" / "curator.ts"
-    real_ts.write_text("old", encoding="utf-8")
+    real_ts.write_text(f"// {integ.MARK} — an earlier install of ours\n", encoding="utf-8")
     plugin.parent.mkdir(parents=True)
     os.symlink(real_ts, plugin)
     integ._install_file("opencode", plugin)

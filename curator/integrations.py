@@ -486,6 +486,8 @@ def _render_template(host: str) -> str:
 
 def _install_file(host: str, target: Path) -> str:
     write_launcher()
+    if target.exists() and MARK not in target.read_text(encoding="utf-8", errors="replace"):
+        raise RuntimeError(f"{target} exists and is not ours — left in place; move it aside to install")
     _write_host_file(target, _render_template(host))
     return f"{_label(host)} installed -> {target}"
 
