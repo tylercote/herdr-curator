@@ -130,7 +130,8 @@ def test_transitions_stale_archive_reactivate(cur, home):
     assert usage["fresh"]["state"] == "active"
     assert usage["old"]["state"] == "stale"
     assert usage["ancient"]["state"] == "archived"
-    assert (skills / ".archive" / "ancient").is_dir() and not (skills / "ancient").exists()
+    from curator import paths
+    assert (paths.archive_dir() / "ancient").is_dir() and not (skills / "ancient").exists()
     assert usage["revived"]["state"] == "active"
 
 
@@ -174,73 +175,8 @@ def test_never_used_skill_gets_grace_floor(cur, home):
     assert counts["reactivated"] == 1
 
 
-def test_candidate_list_marks_cron_referenced_skills(cur, home, monkeypatch):
-    from curator import skill_usage as u
-    skills = home / "skills"
-    write_skill(skills, "cron-dep")
-    write_skill(skills, "plain")
-    _backdate(u, "cron-dep", 1)
-    _backdate(u, "plain", 1)
-    monkeypatch.setattr(cur, "_cron_referenced_skills", lambda: {"cron-dep"})
-    listing = cur._render_candidate_list()
-    cron_line = next(l for l in listing.splitlines() if l.startswith("- cron-dep"))
-    plain_line = next(l for l in listing.splitlines() if l.startswith("- plain"))
-    assert "cron=yes" in cron_line and "cron=no" in plain_line
-    assert "pinned=no" in plain_line
-
-
 def test_candidate_list_empty(cur):
     assert cur._render_candidate_list() == "No curator-managed skills to review."
-
-
-def _write_cron_job(home: Path, skill_ref: str):
-    cron_dir = home / "cron"
-    cron_dir.mkdir(parents=True, exist_ok=True)
-    (cron_dir / "jobs.json").write_text(json.dumps([{
-        "id": "job1", "name": "quarterly digest", "enabled": True, "prompt": "write the digest",
-        "skills": [skill_ref], "schedule": {"kind": "cron", "expr": "0 9 1 */3 *"}}]), encoding="utf-8")
-
-
-def test_cron_referenced_skill_by_name_survives_inactivity(cur, home):
-    from curator import skill_usage as u
-    write_skill(home / "skills", "quarterly-report")
-    _backdate(u, "quarterly-report", 200)
-    _write_cron_job(home, "quarterly-report")
-    counts = cur.apply_automatic_transitions()
-    assert counts["archived"] == 0
-    assert u.load_usage()["quarterly-report"]["state"] == u.STATE_ACTIVE
-
-
-def test_cron_referenced_skill_by_absolute_path_survives_inactivity(cur, home):
-    from curator import skill_usage as u
-    skills = home / "skills"
-    write_skill(skills, "quarterly-report")
-    _backdate(u, "quarterly-report", 200)
-    _write_cron_job(home, str(skills / "quarterly-report"))
-    counts = cur.apply_automatic_transitions()
-    assert counts["archived"] == 0
-    assert u.load_usage()["quarterly-report"]["state"] == u.STATE_ACTIVE
-
-
-def test_unreferenced_skill_is_still_archived(cur, home):
-    from curator import skill_usage as u
-    skills = home / "skills"
-    write_skill(skills, "quarterly-report")
-    write_skill(skills, "orphan")
-    _backdate(u, "quarterly-report", 200)
-    _backdate(u, "orphan", 200)
-    _write_cron_job(home, str(skills / "quarterly-report"))
-    cur.apply_automatic_transitions()
-    usage = u.load_usage()
-    assert usage["quarterly-report"]["state"] == u.STATE_ACTIVE
-    assert usage["orphan"]["state"] == u.STATE_ARCHIVED
-
-
-def test_corrupt_cron_store_never_crashes_transitions(cur, home):
-    (home / "cron").mkdir()
-    (home / "cron" / "jobs.json").write_text("{ nope", encoding="utf-8")
-    assert cur._cron_referenced_skills() == set()
-    assert cur.apply_automatic_transitions()["checked"] == 0
 
 
 

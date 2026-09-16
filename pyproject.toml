@@ -1,6 +1,6 @@
 [project]
 name = "herdr-curator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Herdr plugin: background maintenance for agent-created skills (usage telemetry, stale/archive lifecycle, snapshots, audit ledger, LLM consolidation)."
 requires-python = ">=3.9"
 dependencies = []

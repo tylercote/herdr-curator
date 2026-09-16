@@ -29,12 +29,13 @@ def write_skill(skills_dir: Path, name: str, category: str = "", body: str = "# 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    """Isolated, self-contained curator home with an empty ``skills/`` and an empty ``config.json``."""
+    """Isolated curator state dir ``h`` with the skills tree pinned to ``h/skills`` and the config to
+    ``h/config.json`` (both via env, so subprocesses spawned by tests see the same layout)."""
     h = tmp_path / "curator-home"
     (h / "skills").mkdir(parents=True)
     monkeypatch.setenv("CURATOR_HOME", str(h))
-    monkeypatch.delenv("CURATOR_SKILLS_DIR", raising=False)
-    monkeypatch.delenv("CURATOR_CONFIG", raising=False)
+    monkeypatch.setenv("CURATOR_SKILLS_DIR", str(h / "skills"))
+    monkeypatch.setenv("CURATOR_CONFIG", str(h / "config.json"))
     monkeypatch.delenv("HERDR_PLUGIN_CONFIG_DIR", raising=False)
     monkeypatch.delenv("HERDR_PLUGIN_STATE_DIR", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)

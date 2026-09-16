@@ -1,6 +1,6 @@
 id = "curator"
 name = "Curator"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.8.0"
 platforms = ["macos", "linux"]
 description = "Skill curator: usage telemetry, stale/archive lifecycle, snapshots + audit ledger with rollback, and an opt-in LLM consolidation pass over your SKILL.md library."
@@ -11,8 +11,9 @@ description = "Skill curator: usage telemetry, stale/archive lifecycle, snapshot
 [[build]]
 command = ["sh", "-c", "python3 -c 'import sys; assert sys.version_info >= (3, 9), sys.version'"]
 
-# Install/link/update: (re)write the stable hook launcher the host agents point at, so a new
-# checkout path never strands a hook. Touches nothing outside the plugin's own state dir.
+# GitHub install (Herdr runs [[build]] only there, not on link): (re)write the stable hook launcher
+# the host agents point at, so a new checkout path never strands a hook. [[startup]] refreshes it
+# too. Touches nothing outside the plugin's own state dir.
 [[build]]
 command = ["sh", "-c", "exec python3 bin/curator hooks launcher"]
 

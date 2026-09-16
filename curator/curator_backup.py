@@ -1,10 +1,11 @@
 """Curator snapshot + rollback (port of ``agent/curator_backup.py``).
 
 Before any mutating curator pass, ``<skills>/`` is tar.gz'd under
-``<skills>/.curator_backups/<utc-iso>/`` with a ``manifest.json``. Rollback
-first snapshots the CURRENT tree (so it is itself undoable), then extracts the
-chosen snapshot into place. Excluded: ``.curator_backups/`` and ``.git/``. Each snapshot also copies ``<home>/cron/jobs.json`` as
-``cron-jobs.json`` so rollback can restore cron ``skills``/``skill`` fields.
+``<tree>/snapshots/<utc-iso>/`` with a ``manifest.json``. Rollback first
+snapshots the CURRENT tree (so it is itself undoable), then extracts the chosen
+snapshot into place. A snapshot is purely the skills: ``.git`` is excluded and
+carried across a rollback untouched, and the curator's own data lives outside
+the tree, so a rollback never rewinds telemetry, the ledger or the archive.
 """
 
 from __future__ import annotations
@@ -29,9 +30,8 @@ from curator.skill_utils import is_excluded_skill_path, rglob_following_symlinks
 logger = logging.getLogger(__name__)
 
 DEFAULT_KEEP = 5
-_EXCLUDE_TOP_LEVEL = {".curator_backups", ".git"}
+_EXCLUDE_TOP_LEVEL = {".git"}  # never captured; kept in place across a rollback
 _ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(-\d{2})?$")
-CRON_JOBS_FILENAME = "cron-jobs.json"
 _ARCHIVE_NAME = "skills.tar.gz"
 _STAGING_PREFIX = ".rollback-staging-"
 
@@ -42,33 +42,6 @@ def _skills_dir() -> Path:
 
 def _backups_dir() -> Path:
     return paths.backups_dir()
-
-
-def _jobs_list(parsed: Any) -> Optional[list]:
-    parsed = parsed.get("jobs") if isinstance(parsed, dict) else parsed
-    return parsed if isinstance(parsed, list) else None
-
-
-def _backup_cron_jobs_into(dest: Path) -> Dict[str, Any]:
-    src = paths.cron_jobs_file()
-    info: Dict[str, Any] = {"backed_up": False, "jobs_count": 0}
-    if not src.exists():
-        return {**info, "reason": "no cron/jobs.json present"}
-    try:
-        raw = src.read_text(encoding="utf-8-sig")
-    except OSError as e:
-        logger.debug("Failed to read cron/jobs.json for backup: %s", e)
-        return {**info, "reason": f"read error: {e}"}
-    try:
-        info["jobs_count"] = len(_jobs_list(json.loads(raw)) or [])
-    except (json.JSONDecodeError, TypeError):
-        info["parse_warning"] = "jobs.json was not valid JSON at snapshot time"
-    try:
-        (dest / CRON_JOBS_FILENAME).write_text(raw, encoding="utf-8")
-    except OSError as e:
-        logger.debug("Failed to write cron backup file: %s", e)
-        return {**info, "reason": f"write error: {e}"}
-    return {**info, "backed_up": True}
 
 
 def _utc_id(now: Optional[datetime] = None) -> str:
@@ -98,16 +71,10 @@ def _count_skill_files(base: Path) -> int:
         return 0
 
 
-def _write_manifest(dest: Path, reason: str, archive_path: Path, skills_counted: int, cron_info: Dict[str, Any]) -> None:
-    cron_jobs: Dict[str, Any] = {"backed_up": bool(cron_info.get("backed_up", False)),
-                                 "jobs_count": int(cron_info.get("jobs_count", 0))}
-    if not cron_info.get("backed_up"):
-        cron_jobs["reason"] = cron_info.get("reason", "not captured")
-    if cron_info.get("parse_warning"):
-        cron_jobs["parse_warning"] = cron_info["parse_warning"]
+def _write_manifest(dest: Path, reason: str, archive_path: Path, skills_counted: int) -> None:
     manifest = {"id": dest.name, "reason": reason, "created_at": datetime.now(timezone.utc).isoformat(),
                 "archive": archive_path.name, "archive_bytes": archive_path.stat().st_size,
-                "skill_files": skills_counted, "cron_jobs": cron_jobs}
+                "skill_files": skills_counted, "skills_dir": str(_skills_dir())}
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -143,7 +110,7 @@ def snapshot_skills(reason: str = "manual", *, protect_ids: Optional[Set[str]] =
                 if entry.name not in _EXCLUDE_TOP_LEVEL:
                     tf.add(str(entry), arcname=entry.name, recursive=True,
                            filter=lambda ti: None if any(p in _EXCLUDE_TOP_LEVEL for p in Path(ti.name).parts) else ti)
-        _write_manifest(dest, reason, archive, _count_skill_files(skills), _backup_cron_jobs_into(dest))
+        _write_manifest(dest, reason, archive, _count_skill_files(skills))
     except (OSError, tarfile.TarError) as e:
         logger.debug("Curator snapshot failed: %s", e, exc_info=True)
         shutil.rmtree(dest, ignore_errors=True)
@@ -208,62 +175,6 @@ def _resolve_backup(backup_id: Optional[str]) -> Optional[Path]:
     return next(iter(_restorable_snapshots()), None)
 
 
-def _restore_cron_skill_links(snapshot_dir: Path) -> Dict[str, Any]:
-    """Reconcile backed-up cron skill links into the live jobs.json (``skills``/``skill`` only, by job id)."""
-    report: Dict[str, Any] = {"attempted": False, "restored": [], "skipped_missing": [], "unchanged": 0, "error": None}
-    backup_file = snapshot_dir / CRON_JOBS_FILENAME
-    if not backup_file.exists():
-        return {**report, "error": f"snapshot has no {CRON_JOBS_FILENAME}"}
-    try:
-        backup_jobs = _jobs_list(json.loads(backup_file.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError) as e:
-        return {**report, "error": f"failed to load backed-up jobs: {e}"}
-    if backup_jobs is None:
-        return {**report, "error": "backed-up cron-jobs.json has no jobs list"}
-    backup_by_id: Dict[str, Dict[str, Any]] = {
-        job["id"]: {"skills": job.get("skills"), "skill": job.get("skill"), "name": job.get("name") or job["id"]}
-        for job in backup_jobs if isinstance(job, dict) and isinstance(job.get("id"), str) and job.get("id")}
-    if not backup_by_id:
-        return {**report, "attempted": True}
-    try:
-        from curator.cron_jobs import _jobs_lock, load_jobs, save_jobs
-    except ImportError as e:  # pragma: no cover
-        return {**report, "error": f"cron module unavailable: {e}"}
-    report["attempted"] = True
-    try:
-        with _jobs_lock():
-            live_jobs = load_jobs()
-            changed, live_ids = False, set()
-            for live in live_jobs:
-                jid = live.get("id") if isinstance(live, dict) else None
-                if not isinstance(jid, str) or not jid:
-                    continue
-                live_ids.add(jid)
-                backup = backup_by_id.get(jid)
-                if backup is None:
-                    continue
-                cur = {"skills": live.get("skills"), "skill": live.get("skill")}
-                bkp = {"skills": backup.get("skills"), "skill": backup.get("skill")}
-                if cur == bkp:
-                    report["unchanged"] += 1
-                    continue
-                for key, value in bkp.items():
-                    if value is None:
-                        live.pop(key, None)
-                    else:
-                        live[key] = value
-                report["restored"].append({"job_id": jid, "job_name": backup.get("name") or jid, "from": cur, "to": bkp})
-                changed = True
-            report["skipped_missing"] = [{"job_id": jid, "job_name": b.get("name") or jid}
-                                         for jid, b in backup_by_id.items() if jid not in live_ids]
-            if changed:
-                save_jobs(live_jobs)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("Cron skill-link restore failed: %s", e, exc_info=True)
-        report["error"] = f"restore failed mid-flight: {e}"
-    return report
-
-
 def _remove_entry(entry: Path) -> None:
     if entry.is_dir() and not entry.is_symlink():
         shutil.rmtree(entry)
@@ -292,18 +203,6 @@ def _unstage(moved: List[Tuple[Path, Path]]) -> List[str]:
         except OSError:
             failed.append(orig.name)
     return failed
-
-
-def _cron_summary(cron_report: Dict[str, Any]) -> Optional[str]:
-    if not cron_report.get("attempted"):
-        return None
-    if cron_report.get("error"):
-        return f"cron links: error — {cron_report['error']}"
-    parts = [f"{n} {label}" for n, label in (
-        (len(cron_report.get("restored") or []), "job(s) had skill links restored"),
-        (len(cron_report.get("skipped_missing") or []), "backed-up job(s) no longer exist (skipped)"),
-        (cron_report.get("unchanged", 0), "already matched")) if n]
-    return "cron links: " + ", ".join(parts) if parts else None
 
 
 def rollback(backup_id: Optional[str] = None) -> Tuple[bool, str, Optional[Path]]:
@@ -361,9 +260,8 @@ def rollback(backup_id: Optional[str] = None) -> Tuple[bool, str, Optional[Path]
         return (False, f"snapshot extract failed (state restored): {e}", None)
     _restore_excluded_subtrees(staged, skills)
     shutil.rmtree(staged, ignore_errors=True)
-    cron_report = _restore_cron_skill_links(target)
-    logger.info("Curator rollback: restored from %s (cron_report=%s)", target.name, cron_report)
-    return (True, "; ".join(filter(None, [f"restored from snapshot {target.name}", _cron_summary(cron_report)])), target)
+    logger.info("Curator rollback: restored from %s", target.name)
+    return True, f"restored from snapshot {target.name}", target
 
 
 def summarize_backups() -> str:

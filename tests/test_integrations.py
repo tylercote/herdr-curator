@@ -40,8 +40,9 @@ def test_resolve_path_maps_skill_md_and_support_files(integ, home):
 
 
 def test_resolve_path_ignores_outside_archived_and_missing(integ, home, tmp_path):
-    write_skill(home / "skills" / ".archive", "old")
-    assert integ.resolve_path(home / "skills" / ".archive" / "old" / "SKILL.md") is None
+    from curator import paths
+    write_skill(paths.archive_dir(), "old")
+    assert integ.resolve_path(paths.archive_dir() / "old" / "SKILL.md") is None
     assert integ.resolve_path(tmp_path / "elsewhere" / "SKILL.md") is None
     assert integ.resolve_path(home / "skills" / "nope" / "SKILL.md") is None
     assert integ.resolve_path("") is None
@@ -275,7 +276,7 @@ def test_hooks_main_detects_codex(integ, monkeypatch, tmp_path):
 def test_launcher_is_written_points_at_plugin_root_and_is_silent_when_plugin_is_gone(integ, home, tmp_path):
     import stat, subprocess
     launcher = integ.write_launcher()
-    assert launcher == home / ".curator_plugin" / "bin" / "curator-hook"
+    assert launcher == home / "bin" / "curator-hook"
     assert launcher.stat().st_mode & stat.S_IXUSR
     assert integ.plugin_root_file().read_text(encoding="utf-8").strip() == str(integ.plugin_root())
     text = launcher.read_text(encoding="utf-8")
@@ -331,14 +332,14 @@ def test_uninstall_all_removes_launcher(integ, monkeypatch, tmp_path):
 
 # --- harness skill dirs ----------------------------------------------------------------------
 
-def test_harness_skill_dirs_finds_existing_and_excludes_curated_tree(integ, home, tmp_path, set_config):
+def test_harness_skill_dirs_finds_existing_and_excludes_curated_tree(integ, home, tmp_path, monkeypatch):
     assert integ.harness_skill_dirs() == []
     (tmp_path / ".agents" / "skills").mkdir(parents=True)
     (tmp_path / ".codex" / "skills").mkdir(parents=True)
     (tmp_path / "xdg-config" / "opencode" / "skills").mkdir(parents=True)
     found = integ.harness_skill_dirs()
     assert found == [tmp_path / ".agents" / "skills", tmp_path / ".codex" / "skills", tmp_path / "xdg-config" / "opencode" / "skills"]
-    set_config({"skills": {"dir": str(tmp_path / ".agents" / "skills")}})
+    monkeypatch.setenv("CURATOR_SKILLS_DIR", str(tmp_path / ".agents" / "skills"))
     assert tmp_path / ".agents" / "skills" not in integ.harness_skill_dirs()
 
 
@@ -427,3 +428,47 @@ def test_symlink_inside_external_dir_pointing_elsewhere_is_still_external(integ,
     assert {r["name"]: r["owner"] for r in json.loads(skills_list())["skills"]}["roamer"] == "external"
     assert skill_usage.is_curation_eligible("roamer") is False
     assert skill_usage.adopt_skill("roamer")[0] is False
+
+
+# --- host config files are rewritten in place, not replaced --------------------------------
+
+def test_install_preserves_existing_mode_and_uses_0644_for_new_files(integ):
+    path = integ.claude_settings_path()
+    path.parent.mkdir(parents=True)
+    path.write_text("{}", encoding="utf-8")
+    os.chmod(path, 0o600)
+    integ.install_claude()
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    os.chmod(path, 0o644)
+    integ.install_claude()
+    assert oct(path.stat().st_mode & 0o777) == "0o644"
+    codex = integ.codex_hooks_path()
+    integ.install_json_hooks("codex")
+    umask = os.umask(0); os.umask(umask)
+    assert codex.stat().st_mode & 0o777 == 0o644 & ~umask
+    integ.install_json_hooks("codex")
+    assert codex.stat().st_mode & 0o777 == 0o644 & ~umask
+
+
+def test_install_writes_through_a_symlinked_config_file(integ, tmp_path):
+    """Dotfile managers link ~/.claude/settings.json elsewhere; the link must survive install + uninstall."""
+    real = tmp_path / "dotfiles" / "settings.json"
+    real.parent.mkdir()
+    real.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+    path = integ.claude_settings_path()
+    path.parent.mkdir(parents=True)
+    os.symlink(real, path)
+    integ.install_claude()
+    assert path.is_symlink() and os.readlink(path) == str(real)
+    data = json.loads(real.read_text(encoding="utf-8"))
+    assert data["model"] == "opus" and any(integ._is_our_claude_entry(e) for e in data["hooks"]["PostToolUse"])
+    integ.uninstall_claude()
+    assert path.is_symlink() and json.loads(real.read_text(encoding="utf-8")) == {"model": "opus"}
+    # file installers too
+    plugin = integ.opencode_plugin_path()
+    real_ts = tmp_path / "dotfiles" / "curator.ts"
+    real_ts.write_text("old", encoding="utf-8")
+    plugin.parent.mkdir(parents=True)
+    os.symlink(real_ts, plugin)
+    integ._install_file("opencode", plugin)
+    assert plugin.is_symlink() and integ.MARK in real_ts.read_text(encoding="utf-8")

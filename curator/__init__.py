@@ -2,16 +2,15 @@
 
 Package map:
 
-    paths                 home / skills dir / every derived path (resolved at call time)
+    paths                 state dir / skills dir / per-tree layout (resolved at call time)
     config                layered config.json + defaults (load_config / cfg_get)
     fsutil                atomic_write_text / atomic_json_write
     lifecycle             in-process skill lifecycle hook registry
     skill_utils           scanner, frontmatter, dirs, platform gating
     skill_provenance      write-origin ContextVar (foreground / background_review)
-    skill_usage           .usage.json sidecar: telemetry, state, archive/restore
+    skill_usage           usage.json sidecar: telemetry, state, archive/restore
     skill_ledger          JSONL audit ledger + blob store + single-entry rollback
     curator_backup        whole-tree tar.gz snapshots + rollback
-    cron_jobs             scheduled-job skill references (protect + rewrite)
     skills_tool           skills_list / skill_view
     skill_manager*        skill_manage (create / patch / delete) + guards + batch
     fuzzy_match           patch matching with recovery guidance
@@ -25,4 +24,4 @@ Package map:
     integrations          telemetry hooks for host agents (claude / codex / opencode / pi)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -32,8 +32,8 @@ uninstall touches nothing else.
 Host configs never point at the plugin checkout directly. They point at one
 stable **launcher**, ``<state>/bin/curator-hook``, which execs the *current*
 plugin root's ``bin/curator hook <host>`` and exits 0 silently if the plugin is
-gone. So a ``herdr plugin update`` (new checkout hash) never leaves a stale hook
-behind, Codex never re-demands trust for an unchanged command, and an
+gone. So reinstalling the plugin (Herdr has no ``plugin update``; a fresh ``plugin install``
+is the upgrade path) never leaves a stale hook behind, Codex never re-demands trust for an unchanged command, and an
 uninstalled plugin never spams the host with errors.
 
 ``reconcile()`` is what the Herdr ``[[startup]]`` hook runs every session: write
@@ -88,11 +88,11 @@ def curator_bin() -> Path:
 
 
 def launcher_path() -> Path:
-    return paths.plugin_state_dir() / "bin" / "curator-hook"
+    return paths.state_dir() / "bin" / "curator-hook"
 
 
 def plugin_root_file() -> Path:
-    return paths.plugin_state_dir() / "plugin_root"
+    return paths.state_dir() / "plugin_root"
 
 
 def hook_command(host: str) -> str:
@@ -282,7 +282,7 @@ def record(kind: str, skill: str, session: Optional[str] = None) -> None:
 # --- receiver ----------------------------------------------------------------------------
 
 def hooks_log_path() -> Path:
-    return paths.plugin_state_dir() / "hooks.log"
+    return paths.state_dir() / "hooks.log"
 
 
 def _log(host: str, line: str) -> None:
@@ -299,7 +299,7 @@ def _log(host: str, line: str) -> None:
 
 def hooks_debug_path() -> Path:
     """Touch this file to log a summary of every payload received (event, tool, arg keys)."""
-    return paths.plugin_state_dir() / "hooks.debug"
+    return paths.state_dir() / "hooks.debug"
 
 
 def _summary(payload: Any) -> str:
@@ -380,9 +380,16 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return data
 
 
+def _write_host_file(path: Path, text: str) -> None:
+    """Rewrite a host-owned config file in place: follow a symlink (dotfile managers link these)
+    so the link survives, and keep the existing mode instead of mkstemp's 0600."""
+    target = path.resolve() if path.is_symlink() else path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(target, text, preserve_mode=True, create_mode=0o644)
+
+
 def _write_json(path: Path, data: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    _write_host_file(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def _is_our_command(command: Any, host: str) -> bool:
@@ -476,8 +483,7 @@ def _render_template(host: str) -> str:
 
 def _install_file(host: str, target: Path) -> str:
     write_launcher()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(target, _render_template(host))
+    _write_host_file(target, _render_template(host))
     return f"{_label(host)} installed -> {target}"
 
 

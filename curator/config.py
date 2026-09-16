@@ -5,7 +5,6 @@ which file that is, highest first:
 
     CURATOR_CONFIG
     $HERDR_PLUGIN_CONFIG_DIR/config.json          (set by Herdr for manifest commands)
-    <home>/config.json                            (explicit CURATOR_HOME only)
     ${XDG_CONFIG_HOME:-~/.config}/herdr/plugins/config/curator/config.json
 
 Cached on the file signature ``(mtime_ns, size)`` so a read is cheap and an
@@ -50,7 +49,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "trusted_project_dirs": [],
         "disabled": [],
         "platform_disabled": {},
-        # Audit ledger: every skill mutation appends to <skills>/.curator_ledger.jsonl.
+        # Audit ledger: every skill mutation appends to <state>/trees/<key>/ledger.jsonl.
         "ledger": True,
     },
     # Telemetry hooks in the host agents (see integrations.py). Reconciled at every Herdr session start.
@@ -81,8 +80,6 @@ def config_path() -> Path:
         return paths.expanduser(explicit)
     if os.environ.get("HERDR_PLUGIN_CONFIG_DIR"):
         return paths.herdr_config_dir() / "config.json"
-    if paths.explicit_home():
-        return paths.get_home() / "config.json"
     return paths.herdr_config_dir() / "config.json"
 
 

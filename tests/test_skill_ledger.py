@@ -26,7 +26,8 @@ def _create(name="my-skill", content=VALID_SKILL_CONTENT):
 
 
 def _write_skills_tarball(home: Path, files: dict, stamp: str = "2026-08-01T00-00-00Z"):
-    snap = home / "skills" / ".curator_backups" / stamp
+    from curator import paths
+    snap = paths.backups_dir() / stamp
     snap.mkdir(parents=True, exist_ok=True)
     tar_path = snap / "skills.tar.gz"
     with tarfile.open(tar_path, "w:gz") as tf:
@@ -334,7 +335,25 @@ def test_package_prefixes_shapes(home):
     from curator import skill_ledger
     skills = home / "skills"
     assert skill_ledger.package_prefixes(skills / "cat" / "x", "x") == ["cat/x", "x"]
-    assert skill_ledger.package_prefixes(skills / ".archive" / "x-20260101000000", "x-20260101000000") == [
+    from curator import paths
+    assert skill_ledger.package_prefixes(paths.archive_dir() / "x-20260101000000", "x-20260101000000") == [
         "x-20260101000000", "x"]
     before = [{"path": str(skills / "y" / "SKILL.md"), "sha256": "0" * 64}]
     assert skill_ledger.package_prefixes(None, "y", before) == ["y"]
+
+
+def test_rollback_entry_works_when_skills_live_outside_the_state_dir(herdr_layout):
+    """Herdr layout: skills in ~/.claude/skills, state elsewhere. Entry paths are validated against the
+    skills tree and its archive — not the state dir — so archive + rollback round-trips."""
+    from curator import paths, skill_ledger, skill_usage
+    from tests.conftest import write_skill
+    skills = paths.skills_dir()
+    assert skills == herdr_layout / ".claude" / "skills" and not str(skills).startswith(str(paths.state_dir()))
+    write_skill(skills, "roam")
+    ok, msg = skill_usage.archive_skill("roam")
+    assert ok, msg
+    entry = next(e for e in skill_ledger.list_entries("roam") if e["action"] == "archive")
+    assert any(str(paths.archive_dir()) in i["path"] for i in entry["after"])
+    ok, msg = skill_ledger.rollback_entry(entry["id"])
+    assert ok, msg
+    assert (skills / "roam" / "SKILL.md").exists()

@@ -100,7 +100,7 @@ def open_pane(entrypoint: str, *, placement: Optional[str] = None, env: Optional
 # --- idleness ------------------------------------------------------------------------
 
 def _activity_file() -> Path:
-    return paths.plugin_state_dir() / "activity.json"
+    return paths.state_dir() / "activity.json"
 
 
 def _read_last_activity() -> Optional[datetime]:
@@ -216,7 +216,7 @@ def daemon(interval: float = 60.0, first_idle: float = float("inf")) -> int:
     ``first_idle`` (∞ from ``startup``: a session start is fully idle), later ticks measure idle
     via Herdr. Every pass runs synchronously inside the loop, so a pass cannot be cut short by
     the process exiting; blocking the loop during a pass is fine as it has nothing else to do."""
-    pidfile = paths.plugin_state_dir() / "daemon.pid"
+    pidfile = paths.state_dir() / "daemon.pid"
     try:
         pidfile.parent.mkdir(parents=True, exist_ok=True)
         existing = int(pidfile.read_text().strip()) if pidfile.exists() else None

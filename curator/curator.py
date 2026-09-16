@@ -4,7 +4,7 @@ Inactivity-triggered (no cron daemon): when the agent is idle and the last run
 is older than ``interval_hours``, ``maybe_run_curator()`` auto-transitions
 lifecycle states from activity timestamps, optionally forks a review agent
 that may pin/archive/consolidate/patch skills via ``skill_manage``, and
-persists scheduler state in ``.curator_state``.
+persists scheduler state in the tree's ``state.json``.
 
 Invariants: only curator-managed skills are touched; never delete, only
 archive (recoverable); pinned skills bypass all auto-transitions; the fork
@@ -13,15 +13,15 @@ uses the auxiliary slot and never touches the host agent's session.
 A run has two phases:
 
 1. **Automatic transitions** — pure, no LLM: unused > ``stale_after_days``
-   -> ``stale``; unused > ``archive_after_days`` -> moved to ``.archive/``.
-   Pinned and cron-referenced skills are skipped; never-used skills get a
+   -> ``stale``; unused > ``archive_after_days`` -> moved to the tree's ``archive/``.
+   Pinned skills are skipped; never-used skills get a
    ``stale_after_days`` grace floor.
 2. **LLM consolidation** — opt-in (``curator.consolidate``): the review prompt
    plus the candidate list go to a headless coding agent whose ONLY tools are
    ``skills_list`` / ``skill_view`` / ``skill_manage`` (see ``llm_review`` and
    ``mcp_server``). Its tool calls are audited to classify every removal as
-   consolidated (absorbed into an umbrella) or pruned, cron references are
-   rewritten, and ``run.json`` + ``REPORT.md`` land under ``logs/curator/``.
+   consolidated (absorbed into an umbrella) or pruned, and ``run.json`` +
+   ``REPORT.md`` land under ``logs/curator/``.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ DEFAULT_STALE_AFTER_DAYS, DEFAULT_ARCHIVE_AFTER_DAYS = 30, 90
 DEFAULT_CONSOLIDATE = False
 
 
-# --- .curator_state — persistent scheduler + status ---
+# --- state.json — persistent scheduler + status ---
 
 def _state_file() -> Path:
     return paths.state_file()
@@ -161,15 +161,6 @@ def should_run_now(now: Optional[datetime] = None) -> bool:
 
 # --- Automatic state transitions (pure function, no LLM) ---
 
-def _cron_referenced_skills() -> Set[str]:
-    try:
-        from curator.cron_jobs import referenced_skill_names as _refs
-        return _refs()
-    except Exception as e:
-        logger.debug("Curator could not read cron skill references: %s", e, exc_info=True)
-        return set()
-
-
 def _archive_as_curator(_u, name: str) -> bool:
     try:
         from curator.skill_ledger import reset_ledger_actor, set_ledger_actor
@@ -186,12 +177,11 @@ def _archive_as_curator(_u, name: str) -> bool:
 
 def apply_automatic_transitions(now: Optional[datetime] = None) -> Dict[str, int]:
     """Move every curator-managed skill between active/stale/archived based on its latest real
-    activity; pinned and cron-referenced skills are never touched."""
+    activity; pinned skills are never touched."""
     _u = skill_usage
     now = now or datetime.now(timezone.utc)
     stale_cutoff = now - timedelta(days=get_stale_after_days())
     archive_cutoff = now - timedelta(days=get_archive_after_days())
-    protected = _cron_referenced_skills()
     counts = {"marked_stale": 0, "archived": 0, "reactivated": 0, "checked": 0}
 
     def _set(name: str, state: str, key: str) -> None:
@@ -201,7 +191,7 @@ def apply_automatic_transitions(now: Optional[datetime] = None) -> Dict[str, int
     for row in _u.curated_report():
         counts["checked"] += 1
         name = row["name"]
-        if row.get("pinned") or name in protected:
+        if row.get("pinned"):
             continue
         anchor = _parse_iso(row.get("last_activity_at")) or _parse_iso(row.get("created_at")) or now
         if anchor.tzinfo is None:
@@ -278,14 +268,9 @@ CURATOR_REVIEW_PROMPT = (
     "absorb a user or external skill, and never create an umbrella whose "
     "content is copied from one — reading them for context is fine, that is all.\n"
     "2. DO NOT delete any skill. Archiving (moving the skill's directory "
-    "into the skills tree's .archive/) is the maximum destructive action. "
+    "into the curator's archive) is the maximum destructive action. "
     "Archives are recoverable; deletion is not.\n"
     "3. DO NOT touch skills shown as pinned=yes. Skip them entirely.\n"
-    "3c. DO NOT archive or prune any skill marked `cron=yes` in the candidate "
-    "list. A cron job depends on it and will fail to load it on its next "
-    "run. You MAY still consolidate it into an umbrella — but only because "
-    "the curator rewrites cron job skill references to follow consolidations; "
-    "never simply prune it.\n"
     "5. DO NOT use usage counters as a reason to skip consolidation. The "
     "counters are new and often mostly zero. Judge overlap on CONTENT, "
     "not on use_count. 'use=0' is not evidence a skill is valuable; it's "
@@ -393,8 +378,8 @@ CURATOR_REVIEW_PROMPT = (
     "  - skill_manage action=delete     — archive a skill. MUST pass "
     "`absorbed_into=<umbrella>` when you've merged its content into another "
     "skill, or `absorbed_into=\"\"` when you're truly pruning with no "
-    "forwarding target. This drives cron-job skill-reference migration — "
-    "guessing from your YAML summary after the fact is fragile.\n"
+    "forwarding target. This drives the consolidated-vs-pruned classification in the "
+    "report — guessing from your YAML summary after the fact is fragile.\n"
     "  You have NO terminal access in this pass — every filesystem mutation "
     "goes through skill_manage above so it is ledgered and rollback-able. "
     "Reading files works through skill_view (including "
@@ -627,19 +612,6 @@ def _build_rename_summary(*, before_names: Set[str], after_report: List[Dict[str
     return "\n".join(lines)
 
 
-def _rewrite_cron_refs(consolidated: List[Dict[str, Any]], pruned: List[Dict[str, Any]]) -> Dict[str, Any]:
-    try:
-        consolidated_map = {e["name"]: e["into"] for e in consolidated if isinstance(e, dict) and e.get("name") and e.get("into")}
-        pruned_names = [e["name"] for e in pruned if isinstance(e, dict) and e.get("name")]
-        if consolidated_map or pruned_names:
-            from curator.cron_jobs import rewrite_skill_refs
-            return rewrite_skill_refs(consolidated=consolidated_map, pruned=pruned_names)
-        return {"rewrites": [], "jobs_updated": 0, "jobs_scanned": 0}
-    except Exception as e:
-        logger.debug("Curator cron skill rewrite failed: %s", e, exc_info=True)
-        return {"rewrites": [], "jobs_updated": 0, "jobs_scanned": 0, "error": str(e)}
-
-
 def _write_file(path: Path, label: str, render: Any) -> None:
     try:
         path.write_text(render() if callable(render) else json.dumps(render, indent=2, ensure_ascii=False) + "\n",
@@ -669,8 +641,6 @@ def _write_run_report(*, started_at: datetime, elapsed_seconds: float, auto_coun
               for n in sorted(diff.after_names & before_names))
     transitions = [{"name": n, "from": b, "to": a} for n, b, a in states if b and a and b != a]
     tc_counts: Dict[str, int] = dict(Counter(tc.get("name", "unknown") for tc in tool_calls))
-    cron_rewrites = _rewrite_cron_refs(diff.consolidated, diff.pruned)
-    jobs_updated = int(cron_rewrites.get("jobs_updated", 0))
     payload = {
         "started_at": started_at.isoformat(), "duration_seconds": round(elapsed_seconds, 2),
         "model": llm_meta.get("model", ""), "provider": llm_meta.get("provider", ""), "auto_transitions": auto_counts,
@@ -678,19 +648,16 @@ def _write_run_report(*, started_at: datetime, elapsed_seconds: float, auto_coun
             "before": len(before_names), "after": len(diff.after_names), "delta": len(diff.after_names) - len(before_names),
             "archived_this_run": len(diff.removed), "added_this_run": len(diff.added),
             "consolidated_this_run": len(diff.consolidated), "pruned_this_run": len(diff.pruned),
-            "state_transitions": len(transitions), "cron_jobs_rewritten": jobs_updated,
+            "state_transitions": len(transitions),
             "tool_calls_total": sum(tc_counts.values()),
         },
         "tool_call_counts": tc_counts, "archived": diff.removed, "consolidated": diff.consolidated, "pruned": diff.pruned,
         "pruned_names": [p["name"] for p in diff.pruned], "added": diff.added, "state_transitions": transitions,
-        "cron_rewrites": cron_rewrites,
         "llm_final": llm_meta.get("final", ""), "llm_summary": llm_meta.get("summary", ""),
         "llm_error": llm_meta.get("error"), "tool_calls": llm_meta.get("tool_calls", []),
     }
     _write_file(run_dir / "run.json", "run.json", payload)
     _write_file(run_dir / "REPORT.md", "REPORT.md", lambda: _render_report_markdown(payload))
-    if jobs_updated > 0:
-        _write_file(run_dir / "cron_rewrites.json", "cron_rewrites.json", cron_rewrites)
     return run_dir
 
 
@@ -712,28 +679,18 @@ def _pruned_lines(entry: Any) -> List[str]:
     return [f"- `{entry.get('name', '?')}`" + _reason_suffix(entry) if isinstance(entry, dict) else f"- `{entry}`"]
 
 
-def _cron_rewrite_lines(entry: Dict[str, Any]) -> List[str]:
-    job_name = entry.get("job_name") or entry.get("job_id") or "?"
-    head = f"- `{job_name}`: `{', '.join(entry.get('before') or [])}` → `{', '.join(entry.get('after') or []) or '(none)'}`"
-    return ([head] + [f"    - `{old}` → `{new}` (consolidated)" for old, new in (entry.get("mapped") or {}).items()]
-            + [f"    - `{name}` dropped (pruned)" for name in (entry.get("dropped") or [])])
-
-
 _REPORT_SECTIONS = (
     ("consolidated", "Consolidated into umbrella skills",
      "_These skills were **absorbed into another skill** during this run — their content still lives, just under a different name. "
-     "The original directory was moved to the skills tree's `.archive/` for safety and can be restored via "
+     "The original directory was moved to the curator's archive for safety and can be restored via "
      f"`{_cmd('restore <name>')}` if the consolidation was wrong._\n", _consolidated_lines, 50, "see `run.json`"),
     ("pruned", "Pruned — archived for staleness",
      "_These skills were archived without being merged into an umbrella (e.g. stale, unused, or judged irrelevant). "
-     f"Directories live under the skills tree's `.archive/`. Restore any via `{_cmd('restore <name>')}`._\n",
+     f"Directories live in the curator's archive (`{_cmd('list-archived')}`). Restore any via `{_cmd('restore <name>')}`._\n",
      _pruned_lines, 50, "see `run.json`"),
     ("added", "New skills this run", "_Usually these are new class-level umbrellas created via `skill_manage action=create`._\n",
      lambda n: [f"- `{n}`"], None, ""),
     ("state_transitions", "State transitions", None, lambda t: [f"- `{t.get('name')}`: {t.get('from')} → {t.get('to')}"], None, ""),
-    ("cron_rewrites", "Cron job skill references rewritten",
-     "_Cron jobs that referenced a consolidated or pruned skill were updated in-place so they keep loading the right instructions "
-     "on their next run. See `cron_rewrites.json` for the full record._\n", _cron_rewrite_lines, 25, "see `cron_rewrites.json`"),
 )
 
 
@@ -757,8 +714,6 @@ def _render_report_markdown(p: Dict[str, Any]) -> str:
     ]
     for key, title, intro, render, show, hint in _REPORT_SECTIONS:
         items = p.get(key) or []
-        if key == "cron_rewrites":
-            items = items.get("rewrites") or []
         if not items:
             continue
         lines += [f"### {title} ({len(items)})\n"] + ([intro] if intro else [])
@@ -771,7 +726,7 @@ def _render_report_markdown(p: Dict[str, Any]) -> str:
     elif not error and (p.get("llm_summary") or ""):
         lines += ["## LLM summary\n", p.get("llm_summary"), ""]
     lines += ["## Recovery\n", f"- Restore an archived skill: `{_cmd('restore <name>')}`",
-              "- All archives live under the skills tree's `.archive/` and are recoverable by `mv`",
+              f"- Archived skills are listed by `{_cmd('list-archived')}`; the directory is `{paths.archive_dir()}`",
               "- See `run.json` in this directory for the full machine-readable record.", ""]
     return "\n".join(lines)
 
@@ -782,10 +737,9 @@ def _render_candidate_list() -> str:
     rows = skill_usage.curated_report()
     if not rows:
         return "No curator-managed skills to review."
-    cron_referenced = _cron_referenced_skills()
     return "\n".join([f"Curator-managed skills ({len(rows)}):\n"] + [
         f"- {r['name']}  state={r['state']}  "
-        f"pinned={'yes' if r.get('pinned') else 'no'}  cron={'yes' if r['name'] in cron_referenced else 'no'}  "
+        f"pinned={'yes' if r.get('pinned') else 'no'}  "
         f"activity={r.get('activity_count', 0)}  use={r.get('use_count', 0)}  view={r.get('view_count', 0)}  "
         f"patches={r.get('patch_count', 0)}  last_activity={r.get('last_activity_at') or 'never'}"
         for r in rows
@@ -840,7 +794,7 @@ def _consolidation_pass(prefix: str, auto_summary: str, dry_run: bool, before_na
 def run_curator_review(on_summary: Optional[Callable[[str], None]] = None, synchronous: bool = False,
                        dry_run: bool = False, consolidate: Optional[bool] = None) -> Dict[str, Any]:
     """One curator pass: (1) automatic transitions; (2) if *consolidate* and there are candidates,
-    fork the review agent; (3) update .curator_state; (4) call *on_summary*. *dry_run* skips the
+    fork the review agent; (3) update state.json; (4) call *on_summary*. *dry_run* skips the
     transitions and instructs the fork to report only; REPORT.md is still written."""
     consolidate = get_consolidate() if consolidate is None else consolidate
     start = datetime.now(timezone.utc)

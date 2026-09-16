@@ -8,6 +8,8 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from curator import paths
+
 
 def _write_skill(skills_dir: Path, name: str, body: str = "body") -> Path:
     d = skills_dir / name
@@ -19,15 +21,15 @@ def _write_skill(skills_dir: Path, name: str, body: str = "body") -> Path:
 def test_snapshot_writes_tarball_and_manifest(home):
     from curator import curator_backup as cb
     _write_skill(home / "skills", "alpha")
-    (home / "skills" / ".usage.json").write_text("{}", encoding="utf-8")
     snap = cb.snapshot_skills(reason="unit")
     assert snap is not None and (snap / "skills.tar.gz").exists()
+    assert snap.parent == paths.backups_dir() and not (home / "skills" / ".curator_backups").exists()
     mf = json.loads((snap / "manifest.json").read_text(encoding="utf-8"))
     assert mf["reason"] == "unit" and mf["skill_files"] == 1 and mf["archive"] == "skills.tar.gz"
-    assert mf["cron_jobs"]["backed_up"] is False and "reason" in mf["cron_jobs"]
+    assert mf["skills_dir"] == str(home / "skills") and "cron_jobs" not in mf
     with tarfile.open(snap / "skills.tar.gz", "r:gz") as tf:
         names = tf.getnames()
-    assert "alpha/SKILL.md" in names and ".usage.json" in names
+    assert names == ["alpha", "alpha/SKILL.md"]
 
 
 def test_snapshot_disabled_by_config_and_missing_skills_dir(home, set_config):
@@ -59,7 +61,7 @@ def test_snapshot_prunes_to_keep_count(home, monkeypatch):
     for i, fid in enumerate(ids):
         monkeypatch.setattr(cb, "_utc_id", lambda now=None, _f=fid: _f)
         cb.snapshot_skills(reason=f"n{i}")
-    remaining = sorted(p.name for p in (home / "skills" / ".curator_backups").iterdir())
+    remaining = sorted(p.name for p in paths.backups_dir().iterdir())
     assert remaining == ids[2:]
 
 
@@ -79,7 +81,7 @@ def test_list_backups_and_resolve(home, monkeypatch):
     text = cb.summarize_backups()
     assert "2026-05-02T00-00-00Z" in text and "two" in text
     assert cb.summarize_backups.__doc__ or True
-    (home / "skills" / ".curator_backups" / "2026-05-02T00-00-00Z" / "skills.tar.gz").unlink()
+    (paths.backups_dir() / "2026-05-02T00-00-00Z" / "skills.tar.gz").unlink()
     assert cb._resolve_backup(None).name == "2026-05-01T00-00-00Z"
 
 
@@ -101,7 +103,7 @@ def test_rollback_is_itself_undoable(home):
     assert (skills / "v1").exists() and not (skills / "v2").exists()
     rows = cb.list_backups()
     assert any("pre-rollback" in (r.get("reason") or "") for r in rows)
-    assert not list((skills / ".curator_backups").glob(".rollback-staging-*"))
+    assert not list(paths.backups_dir().glob(".rollback-staging-*"))
 
 
 def test_rollback_aborts_when_safety_snapshot_fails(home, monkeypatch):
@@ -115,7 +117,7 @@ def test_rollback_aborts_when_safety_snapshot_fails(home, monkeypatch):
     ok, msg, restored = cb.rollback(target.name)
     assert not ok and "safety snapshot failed" in msg and restored is None
     assert skill_file.read_bytes() == current
-    assert not list((skills / ".curator_backups").glob(".rollback-staging-*"))
+    assert not list(paths.backups_dir().glob(".rollback-staging-*"))
 
 
 def test_rollback_no_snapshots_returns_error(home):
@@ -159,84 +161,6 @@ def test_dry_run_takes_no_snapshot(home, monkeypatch):
     _write_skill(home / "skills", "alpha")
     curator.run_curator_review(synchronous=True, dry_run=True)
     assert cb.list_backups() == []
-
-
-# ---------------------------------------------------------------------------
-# cron-jobs backup + rollback
-# ---------------------------------------------------------------------------
-
-def _write_cron_jobs(home: Path, jobs: list) -> Path:
-    cron_dir = home / "cron"
-    cron_dir.mkdir(parents=True, exist_ok=True)
-    path = cron_dir / "jobs.json"
-    path.write_text(json.dumps({"jobs": jobs, "updated_at": "2026-05-01T00:00:00Z"}, indent=2), encoding="utf-8")
-    return path
-
-
-def test_snapshot_cron_jobs_utf8_bom_counted_and_backup_bomless(home):
-    from curator import curator_backup as cb
-    _write_skill(home / "skills", "alpha")
-    cron_dir = home / "cron"
-    cron_dir.mkdir()
-    payload = json.dumps({"jobs": [{"id": "job-a"}, {"id": "job-b"}]})
-    (cron_dir / "jobs.json").write_bytes(b"\xef\xbb\xbf" + payload.encode())
-    snap = cb.snapshot_skills(reason="test")
-    mf = json.loads((snap / "manifest.json").read_text(encoding="utf-8"))
-    assert mf["cron_jobs"]["backed_up"] is True and mf["cron_jobs"]["jobs_count"] == 2
-    assert "parse_warning" not in mf["cron_jobs"]
-    backup_bytes = (snap / cb.CRON_JOBS_FILENAME).read_bytes()
-    assert not backup_bytes.startswith(b"\xef\xbb\xbf")
-    assert json.loads(backup_bytes) == json.loads(payload)
-
-
-def test_rollback_restores_cron_skill_links(home):
-    from curator import cron_jobs as cj, curator_backup as cb
-    _write_skill(home / "skills", "alpha")
-    _write_skill(home / "skills", "beta")
-    _write_skill(home / "skills", "umbrella")
-    cj.create_job(name="weekly", prompt="p", schedule="every 7d", skills=["alpha", "beta"])
-    snap = cb.snapshot_skills(reason="pre-curator-run")
-    cj.rewrite_skill_refs(consolidated={"alpha": "umbrella", "beta": "umbrella"}, pruned=[])
-    assert cj.load_jobs()[0]["skills"] == ["umbrella"]
-    ok, msg, _ = cb.rollback(backup_id=snap.name)
-    assert ok, msg
-    assert "cron links" in msg
-    assert cj.load_jobs()[0]["skills"] == ["alpha", "beta"]
-
-
-def test_rollback_leaves_new_jobs_untouched(home):
-    from curator import cron_jobs as cj, curator_backup as cb
-    _write_skill(home / "skills", "alpha")
-    _write_cron_jobs(home, [{"id": "original", "name": "o", "schedule": "every 1h", "skills": ["alpha"]}])
-    snap = cb.snapshot_skills(reason="pre-curator-run")
-    jobs = cj.load_jobs()
-    jobs.append({"id": "new-after-snapshot", "name": "new", "schedule": "every 15m", "skills": ["brand-new-skill"]})
-    cj.save_jobs(jobs)
-    ok, _, _ = cb.rollback(backup_id=snap.name)
-    assert ok
-    by_id = {j["id"]: j for j in cj.load_jobs()}
-    assert by_id["new-after-snapshot"]["skills"] == ["brand-new-skill"]
-    assert by_id["new-after-snapshot"]["schedule"] == "every 15m"
-
-
-def test_restore_cron_skill_links_standalone(home):
-    from curator import curator_backup as cb
-    backups_dir = home / "skills" / ".curator_backups" / "fake-id"
-    backups_dir.mkdir(parents=True)
-    (backups_dir / cb.CRON_JOBS_FILENAME).write_text(json.dumps([
-        {"id": "job-1", "name": "one", "skills": ["narrow-a", "narrow-b"]},
-        {"id": "job-2", "name": "two", "skill": "legacy-single"},
-        {"id": "job-gone", "name": "deleted", "skills": ["whatever"]}]), encoding="utf-8")
-    _write_cron_jobs(home, [
-        {"id": "job-1", "name": "one", "skills": ["umbrella"], "schedule": "every 1h"},
-        {"id": "job-2", "name": "two", "skill": "legacy-single", "schedule": "every 1h"},
-        {"id": "job-new", "name": "new", "skills": ["x"], "schedule": "every 1h"}])
-    report = cb._restore_cron_skill_links(backups_dir)
-    assert report["attempted"] is True and report["error"] is None
-    assert report["unchanged"] == 1
-    assert len(report["restored"]) == 1 and report["restored"][0]["job_id"] == "job-1"
-    assert report["restored"][0]["to"]["skills"] == ["narrow-a", "narrow-b"]
-    assert len(report["skipped_missing"]) == 1 and report["skipped_missing"][0]["job_id"] == "job-gone"
 
 
 def test_rollback_safety_snapshot_never_prunes_its_target(home, monkeypatch):
@@ -301,7 +225,7 @@ def test_rollback_recovers_cleanly_from_a_partial_extract(home, monkeypatch):
     assert "current only" in (skills / "beta" / "SKILL.md").read_text(encoding="utf-8")
 
 
-def test_snapshot_excludes_git_and_curator_backups(home):
+def test_snapshot_excludes_git(home):
     from curator import curator_backup as cb
     skills = home / "skills"
     (skills / ".git").mkdir()
@@ -315,7 +239,7 @@ def test_snapshot_excludes_git_and_curator_backups(home):
         members = tf.getnames()
     for name in members:
         parts = Path(name).parts
-        assert ".git" not in parts and ".curator_backups" not in parts
+        assert ".git" not in parts
     assert "alpha/SKILL.md" in members
 
 
@@ -351,7 +275,7 @@ def test_rollback_preserves_nested_git_inside_skill(home):
     assert ok, msg
     assert "v1" in (skills / "alpha" / "SKILL.md").read_text(encoding="utf-8")
     assert (nested_git / "HEAD").read_text(encoding="utf-8") == "ref: refs/heads/feature\n"
-    assert list((skills / ".curator_backups").glob(".rollback-staging-*")) == []
+    assert list(paths.backups_dir().glob(".rollback-staging-*")) == []
 
 
 def test_rollback_preserves_nested_git_file_pointer(home):
@@ -376,3 +300,20 @@ def test_format_bytes():
     assert format_bytes(1234567) == "1.2 MB"
     assert format_bytes(None) == "?"
     assert format_bytes(2 ** 40 * 3) == "3.0 TB"
+
+
+def test_rollback_never_touches_curator_data(home):
+    """Telemetry, ledger and archive live outside the tree, so a whole-tree rollback leaves them alone."""
+    from curator import curator_backup as cb, skill_usage as u
+    skills = home / "skills"
+    _write_skill(skills, "alpha", body="v1")
+    u.bump_use("alpha")
+    snap = cb.snapshot_skills(reason="v1")
+    u.bump_use("alpha"); u.bump_use("alpha")
+    _write_skill(skills, "gone-later")
+    assert u.archive_skill("gone-later")[0]
+    ok, msg, _ = cb.rollback(backup_id=snap.name)
+    assert ok, msg
+    assert u.get_record("alpha")["use_count"] == 3                    # telemetry not rewound
+    assert (paths.archive_dir() / "gone-later" / "SKILL.md").exists()  # archive untouched
+    assert sorted(p.name for p in skills.iterdir()) == ["alpha"]

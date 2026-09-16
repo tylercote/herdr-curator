@@ -1,4 +1,4 @@
-"""curator.curator — per-run report writer (run.json + REPORT.md), cron rewrite integration,
+"""curator.curator — per-run report writer (run.json + REPORT.md),
 and the activity-timestamp regression (ports of test_curator_reports.py / test_curator_activity.py)."""
 
 from __future__ import annotations
@@ -83,40 +83,6 @@ def test_report_state_transitions_and_added_sections(home):
     assert "### State transitions (1)" in md and "- `a`: active → stale" in md
     assert "### New skills this run (1)" in md and "- `c`" in md
     assert "tool calls: **3** (by name: skill_manage=1, skill_view=2)" in md
-
-
-def test_curator_rewrites_cron_skills_when_skill_consolidated(home):
-    from curator import cron_jobs as jobs, curator
-    job = jobs.create_job(prompt="", schedule="every 1h", skills=["foo"], name="foo-watcher")
-    before = [{"name": "foo", "state": "active", "pinned": False}]
-    after = [{"name": "foo-umbrella", "state": "active", "pinned": False}]
-    run_dir = curator._write_run_report(
-        started_at=datetime.now(timezone.utc), elapsed_seconds=3.0,
-        auto_counts={"checked": 1, "marked_stale": 0, "archived": 0, "reactivated": 0}, auto_summary="no changes",
-        before_report=before, before_names={"foo"}, after_report=after,
-        llm_meta=_make_llm_meta(final="Consolidated foo into foo-umbrella.", tool_calls=[
-            {"name": "skill_manage", "arguments": json.dumps({"action": "write_file", "name": "foo-umbrella",
-                                                             "file_path": "references/foo.md", "file_content": "from foo"})}]))
-    loaded = jobs.get_job(job["id"])
-    assert loaded["skills"] == ["foo-umbrella"] and loaded["skill"] == "foo-umbrella"
-    payload = json.loads((run_dir / "run.json").read_text())
-    assert payload["cron_rewrites"]["jobs_updated"] == 1 and payload["counts"]["cron_jobs_rewritten"] == 1
-    assert payload["cron_rewrites"]["rewrites"][0]["mapped"] == {"foo": "foo-umbrella"}
-    detail = json.loads((run_dir / "cron_rewrites.json").read_text())
-    assert detail["jobs_updated"] == 1
-    md = (run_dir / "REPORT.md").read_text()
-    assert "Cron job skill references rewritten" in md and "foo-watcher" in md and "foo-umbrella" in md
-    assert "- `foo` → `foo-umbrella` (consolidated)" in md
-
-
-def test_no_cron_rewrite_file_when_nothing_rewritten(home):
-    from curator import curator
-    run_dir = curator._write_run_report(
-        started_at=datetime.now(timezone.utc), elapsed_seconds=1, auto_counts=_empty_counts(), auto_summary="x",
-        before_report=[{"name": "gone", "state": "active"}], before_names={"gone"}, after_report=[], llm_meta=_make_llm_meta())
-    assert not (run_dir / "cron_rewrites.json").exists()
-    payload = json.loads((run_dir / "run.json").read_text())
-    assert payload["cron_rewrites"] == {"rewrites": [], "jobs_updated": 0, "jobs_scanned": 0}
 
 
 def test_recent_view_activity_prevents_false_stale_transition(home, monkeypatch):

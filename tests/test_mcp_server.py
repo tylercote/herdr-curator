@@ -109,7 +109,8 @@ def test_background_review_guards_are_live_in_server(home, tmp_path):
     skill_usage.adopt_skill("umbrella")
     _, r = _call(server, "skill_manage", {"action": "delete", "name": "mine", "absorbed_into": "umbrella"})
     assert r["success"] is True and r["_archived"] is True
-    assert (home / "skills" / ".archive" / "mine").exists()
+    from curator import paths
+    assert (paths.archive_dir() / "mine").exists()
 
 
 def test_dry_run_server_refuses_mutations_but_allows_reads(home, tmp_path):

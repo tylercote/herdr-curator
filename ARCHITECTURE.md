@@ -12,44 +12,46 @@ system around it:
 
 | Concern | Mechanism |
 |---|---|
-| know what is used | `.usage.json` sidecar: `use_count`, `view_count`, `patch_count`, timestamps, `created_by`, `state`, `pinned` |
-| retire what is not | `active → stale → archived` transitions from the newest real activity; archive = `mv` into `.archive/`, never delete |
-| never touch what is not yours | three owners — `managed` (`created_by: agent`, set solely by a `skill_manage` create or by `curator adopt`), `user` (never touched), `external` (read-only dirs); pinned skills are untouchable; cron-referenced skills are exempt from auto-transitions |
-| make everything reversible | tar.gz snapshot of the tree before every real pass; a JSONL ledger with before/after blobs for every mutation; whole-tree and single-entry rollback, each taking a safety capture first and failing closed |
+| know what is used | `usage.json` sidecar (outside the tree): `use_count`, `view_count`, `patch_count`, timestamps, `created_by`, `state`, `pinned` |
+| retire what is not | `active → stale → archived` transitions from the newest real activity; archive = `mv` into the tree's `archive/` under the state dir, never delete |
+| never touch what is not yours | three owners — `managed` (`created_by: agent`, set solely by a `skill_manage` create or by `curator adopt`), `user` (never touched), `external` (read-only dirs); pinned skills are untouchable |
+| make everything reversible | tar.gz snapshot of the tree (skills only — the curator's own data is elsewhere, so a restore never rewinds telemetry or the ledger) before every real pass; a JSONL ledger with before/after blobs for every mutation; whole-tree and single-entry rollback, each taking a safety capture first and failing closed |
 | shrink the library intelligently | an optional LLM pass whose tool surface is exactly `skills_list / skill_view / skill_manage`, audited afterwards |
 | tell the user | `run.json` + `REPORT.md` per run, a rename map in the summary, `status` |
 
 ## 2. Layout on disk
 
-One rule: an explicit `CURATOR_HOME` is a self-contained tree (tests, multi-home
-tooling); otherwise the plugin lives in Herdr's plugin directories and curates
-Claude Code's skills. Herdr passes `HERDR_PLUGIN_STATE_DIR` / `HERDR_PLUGIN_CONFIG_DIR`
-to manifest commands; the XDG fallbacks reconstruct the same paths, so a bare
-`curator` in any shell and the scheduled plugin run agree on every path.
+The skills tree belongs to the user (by default it is Claude Code's); **the curator writes
+nothing into it**. Everything the curator knows about a tree lives in one per-tree directory
+under the plugin state dir, keyed by the tree's resolved path. Herdr passes
+`HERDR_PLUGIN_STATE_DIR` / `HERDR_PLUGIN_CONFIG_DIR` to manifest commands; the XDG fallbacks
+reconstruct the same paths, so a bare `curator` in any shell and the scheduled plugin run
+agree on every path. `CURATOR_HOME` overrides the state dir outside Herdr (tests, tooling) and
+nothing else.
 
 ```
-<home>                     CURATOR_HOME | HERDR_PLUGIN_STATE_DIR | ${XDG_STATE_HOME:-~/.local/state}/herdr/plugins/curator
-├── logs/curator/<stamp>/  run.json, REPORT.md, [cron_rewrites.json]
+<state>                    HERDR_PLUGIN_STATE_DIR | CURATOR_HOME | ${XDG_STATE_HOME:-~/.local/state}/herdr/plugins/curator
+├── trees/<key>/           <parent>-<name>-<sha1[:8] of the resolved skills path>, e.g. claude-skills-3fa2b1c9
+│   ├── usage.json         telemetry + provenance sidecar  (+ usage.json.lock)
+│   ├── state.json         scheduler state
+│   ├── ledger.jsonl       per-mutation audit ledger (index)
+│   ├── blobs/<sha256>     ledger blob store (content-addressed)
+│   ├── archive/<name>[-YYYYMMDDHHMMSS]/   archived skills, flat, recoverable
+│   └── snapshots/<utc-iso>/{skills.tar.gz, manifest.json}
+├── logs/curator/<stamp>/  run.json, REPORT.md
 │   └── .runs/<stamp>/     LLM pass artifacts: prompt.txt, mcp.json, stdout/stderr, tool_calls.jsonl
-├── .curator_backups/blobs/<sha256>          ledger blob store (content-addressed)
-├── cron/jobs.json         scheduled jobs — skill references are protected + rewritten
-├── daemon.pid, activity.json               (plugin state; under <home>/.curator_plugin/ for an explicit home)
-│
-<config>/config.json       CURATOR_CONFIG | $HERDR_PLUGIN_CONFIG_DIR | <home> (explicit home)
-                           | ${XDG_CONFIG_HOME:-~/.config}/herdr/plugins/config/curator
-<skills>/                  CURATOR_SKILLS_DIR | config skills.dir | <home>/skills (explicit home) | ~/.claude/skills
+├── bin/curator-hook, plugin_root             stable telemetry-hook launcher
+└── daemon.pid, activity.json, hooks.log
+<config>/config.json       CURATOR_CONFIG | $HERDR_PLUGIN_CONFIG_DIR | ${XDG_CONFIG_HOME:-~/.config}/herdr/plugins/config/curator
+<skills>/                  CURATOR_SKILLS_DIR | config skills.dir | ~/.claude/skills
     ├── <name>/SKILL.md [references/ templates/ scripts/ assets/]
-    ├── <category>/<name>/SKILL.md
-    ├── .usage.json        telemetry + provenance sidecar  (+ .usage.json.lock)
-    ├── .curator_state     scheduler state
-    ├── .curator_ledger.jsonl
-    ├── .curator_backups/<utc-iso>/{skills.tar.gz, manifest.json, cron-jobs.json}
-    ├── .archive/<name>[-YYYYMMDDHHMMSS]/
+    └── <category>/<name>/SKILL.md
 ```
 
-The split — sidecars and snapshots *inside* `skills/`, blobs and logs *under
-home* — is load-bearing: snapshots exclude `.curator_backups`,
-`.git`; the ledger blob store must survive a tree rollback.
+Because nothing of the curator's is in the tree, a snapshot is purely "the skills as they
+were": `curator_backup` excludes only `.git` (carried across a rollback untouched), and a
+whole-tree rollback cannot rewind telemetry, the ledger or the archive. A ledger entry may
+reference files in the skills tree or in `archive/` and nowhere else (`skill_ledger._managed_roots`).
 
 ## 3. Module graph
 
@@ -72,9 +74,9 @@ skill_usage.py     skill_manager.py ◄─ skill_manager_guards.py, skill_manage
  archive/restore)  (skills_list,                                    consolidation delete / pinned / rmtree)
    │                skill_view)
    ▼
-skill_ledger.py    curator_backup.py    cron_jobs.py
-(JSONL + blobs,    (tar.gz snapshots,   (referenced_skill_names,
- rollback_entry)    rollback)            rewrite_skill_refs)
+skill_ledger.py    curator_backup.py
+(JSONL + blobs,    (tar.gz snapshots,
+ rollback_entry)    rollback)
    └────────────── foundations: paths.py  config.py  fsutil.py  skill_utils.py  skill_provenance.py  lifecycle.py
 ```
 
@@ -87,12 +89,12 @@ caching), which is why tests need no module reloads.
 For each row of `skill_usage.curated_report()` (managed skills + pinned
 eligible ones):
 
-1. `pinned` or cron-referenced → skip.
+1. `pinned` → skip.
 2. `anchor = last_activity_at or created_at or now` where `last_activity_at = max(last_used, last_viewed, last_patched)` — **`created_at` is excluded** so never-active skills stay distinguishable.
 3. `use_count == 0 and anchor > stale_cutoff` → grace floor: never archive a never-used skill younger than `stale_after_days`; un-stale it if it was stale.
 4. `anchor ≤ archive_cutoff` → `archive_skill` with ledger actor `curator`; `≤ stale_cutoff` → `stale`; `> stale_cutoff and stale` → `active`.
 
-`archive_skill` moves the directory flat into `.archive/` (timestamp suffix on
+`archive_skill` moves the directory flat into the tree's `archive/` (timestamp suffix on
 collision), sets `state=archived`,
 and records a `complete_package` ledger entry — one whose before-manifest is
 filled from the newest snapshot so a skill whose support files were re-homed
@@ -125,8 +127,8 @@ Eligibility (`is_curation_eligible`) is orthogonal: external-dir skills are
 |---|---|---|
 | pre-run snapshot | `run_curator_review` | `snapshot_skills("pre-curator-run")`; best-effort, never aborts a pass |
 | ledger | `skill_ledger.record_mutation` via `skill_manager._record_success`, `skill_usage._relocate`, `cli purge` | append-only JSONL, blobs deduped by sha256; **telemetry, never a gate** |
-| single-entry rollback | `skill_ledger.rollback_entry` | validates every path is under home, pre-checks every blob, appends a `pre-rollback` safety entry, then restores before-files and removes files the mutation created; fails closed |
-| whole-tree rollback | `curator_backup.rollback` | safety snapshot first (protected from its own prune), stage current tree, extract with `..`/absolute rejection, carry excluded subtrees (`.git`) back, restore cron `skills`/`skill` fields by job id |
+| single-entry rollback | `skill_ledger.rollback_entry` | validates every path is under the skills tree or its archive, pre-checks every blob, appends a `pre-rollback` safety entry, then restores before-files and removes files the mutation created; fails closed |
+| whole-tree rollback | `curator_backup.rollback` | safety snapshot first (protected from its own prune), stage current tree, extract with `..`/absolute rejection, carry excluded subtrees (`.git`) back |
 | ownership guard | `skill_manager_guards._ownership_write_guard` | **unconditional** (not origin-gated): refuses non-managed, external and pinned skills for every mutating action; `_pinned_guard` is the delete-path backstop, and essential skills can never be deleted |
 | rmtree guard | `_validate_delete_target` | never delete a symlink, a skills root, or a path outside every root |
 | background-review guards | `_background_review_write_guard`, `_read_before_write_guard`, `_curator_consolidation_delete_guard` | see §7 |
@@ -169,9 +171,7 @@ disappeared between the before/after `curated_report()`:
 3. the tool-call audit: a `skill_manage` call on a *different surviving or new* skill whose `file_path` (whole path component, `-`/`_` normalised) or content (word boundary) mentions the removed name.
 4. otherwise pruned (`no-evidence fallback`).
 
-Consolidations rewrite cron job references to the umbrella; prunes drop them
-(`cron_jobs.rewrite_skill_refs`). The report records source and evidence per
-entry, plus `⚠` when the model named an umbrella that does not exist.
+The report records source and evidence per entry, plus `⚠` when the model named an umbrella that does not exist.
 
 ## 8. Scheduling inside Herdr
 
@@ -195,7 +195,7 @@ layered on the same rows:
 
 ```
 SkillsModel   rows() = skill_usage.usage_report() ⊕ skills_tool._find_all_skills(skip_disabled=True)
-              ⊕ .archive/ names  → {name, category, description, provenance, state, pinned, managed,
+              ⊕ archive/ names   → {name, category, description, provenance, state, pinned, managed,
               enabled, counts, last_activity_at, path}
               set_enabled / toggle_enabled / set_category_enabled (a category is enabled unless
               ALL its skills are disabled) · adopt / unadopt / pin / archive / restore (same rules
@@ -269,13 +269,13 @@ curator.auxiliary.{provider,model} ← legacy, still honoured with a deprecation
 ## 10. Testing strategy
 
 `tests/` covers every module (`test_curator*.py`, `test_skill_usage.py`,
-`test_skill_ledger.py`, `test_curator_backup.py`, `test_cron_jobs.py`,
+`test_skill_ledger.py`, `test_curator_backup.py`, `test_paths_config.py`,
 `test_cli.py`, `test_skill_manager.py`, …) plus the host surfaces
 (`test_llm_review.py` with an injected spawner, `test_mcp_server.py` including
 a real `bin/curator mcp-serve` subprocess round-trip, `test_herdr.py` with a
 fake `herdr` binary and manifest/README consistency checks). Every test runs
-under either the `home` fixture (explicit `CURATOR_HOME`) or `herdr_env` (Herdr
-layout with HOME and the XDG roots redirected). The suite is offline; nothing
+under either the `home` fixture (state, skills and config pinned to one tmp dir via env)
+or `herdr_layout` / `herdr_env` (a plain Herdr install with HOME and the XDG roots redirected). The suite is offline; nothing
 spawns a real model. Run `uv run --with pytest pytest`.
 
 ## 11. Extending

@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from curator import paths
+
 from conftest import write_skill
 
 
@@ -56,12 +58,14 @@ def test_get_record_missing_returns_empty_record(home):
 
 def test_load_usage_handles_corrupt_file(home):
     from curator.skill_usage import load_usage, _usage_file
+    _usage_file().parent.mkdir(parents=True, exist_ok=True)
     _usage_file().write_text("{ not json }", encoding="utf-8")
     assert load_usage() == {}
 
 
 def test_load_usage_drops_non_dict_values(home):
     from curator.skill_usage import load_usage, _usage_file
+    _usage_file().parent.mkdir(parents=True, exist_ok=True)
     _usage_file().write_text(json.dumps({"ok": {"use_count": 1}, "junk": 5}), encoding="utf-8")
     assert load_usage() == {"ok": {"use_count": 1}}
 
@@ -301,7 +305,7 @@ def test_archive_and_restore_roundtrip(home):
     ok, msg = u.archive_skill("mine")
     assert ok, msg
     assert not (skills_dir / "mine").exists()
-    assert (skills_dir / ".archive" / "mine" / "SKILL.md").exists()
+    assert (paths.archive_dir() / "mine" / "SKILL.md").exists()
     assert u.get_record("mine")["state"] == u.STATE_ARCHIVED
     assert u.get_record("mine")["archived_at"] is not None
     assert u.list_archived_skill_names() == ["mine"]
@@ -317,18 +321,18 @@ def test_archive_flattens_nested_skill_and_suffixes_collision(home):
     skills_dir = home / "skills"
     write_skill(skills_dir, "dup", category="cat")
     assert u.archive_skill("dup")[0]
-    assert (skills_dir / ".archive" / "dup").is_dir()
+    assert (paths.archive_dir() / "dup").is_dir()
     write_skill(skills_dir, "dup")
     ok, msg = u.archive_skill("dup")
     assert ok, msg
-    suffixed = [p.name for p in (skills_dir / ".archive").iterdir() if p.name.startswith("dup-")]
+    suffixed = [p.name for p in (paths.archive_dir()).iterdir() if p.name.startswith("dup-")]
     assert len(suffixed) == 1 and len(suffixed[0]) == len("dup-") + 14
 
 
 def test_restore_picks_exact_name_then_newest_timestamped_never_prefix_sibling(home):
     from curator import skill_usage as u
     skills_dir = home / "skills"
-    archive = skills_dir / ".archive"
+    archive = paths.archive_dir()
     write_skill(archive, "git-helpers")
     write_skill(archive, "git-20260101000000")
     write_skill(archive, "git-20260201000000")
@@ -344,7 +348,7 @@ def test_restore_refuses_when_destination_exists_or_missing_archive(home):
     from curator import skill_usage as u
     skills_dir = home / "skills"
     assert u.restore_skill("nothing") == (False, "no archive directory")
-    write_skill(skills_dir / ".archive", "x")
+    write_skill(paths.archive_dir(), "x")
     write_skill(skills_dir, "x")
     ok, msg = u.restore_skill("x")
     assert ok is False and "destination already exists" in msg
@@ -354,7 +358,7 @@ def test_restore_refuses_when_destination_exists_or_missing_archive(home):
 
 def test_restore_archived_skill(home):
     from curator import skill_usage as u
-    write_skill(home / "skills" / ".archive", "b")
+    write_skill(paths.archive_dir(), "b")
     assert u.restore_skill("b")[0] is True
     assert (home / "skills" / "b" / "SKILL.md").exists()
 
@@ -462,7 +466,8 @@ def test_end_to_end_telemetry_tracked_but_lifecycle_refused(home, tmp_path, set_
 # ---------------------------------------------------------------------------
 
 def _seed_usage(skills_dir: Path, records: dict) -> None:
-    (skills_dir / ".usage.json").write_text(json.dumps(records, indent=1), encoding="utf-8")
+    paths.usage_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.usage_file().write_text(json.dumps(records, indent=1), encoding="utf-8")
 
 
 def test_unmanaged_report_explains_why(home):

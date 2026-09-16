@@ -460,17 +460,10 @@ def _cmd_rollback(args) -> int:
         print(f"  reason:      {manifest.get('reason', '?')}")
         print(f"  created_at:  {manifest.get('created_at', '?')}")
         print(f"  skill files: {manifest.get('skill_files', '?')}")
-        cron = manifest.get("cron_jobs") or {}
-        if isinstance(cron, dict):
-            if cron.get("backed_up"):
-                print(f"  cron jobs:   {cron.get('jobs_count', 0)} (will be restored for skill-link fields only)")
-            else:
-                print(f"  cron jobs:   not in snapshot ({cron.get('reason', 'not captured')})")
     print("\nThis will replace the current skills tree — EVERY skill, including ones the curator does not manage — "
           "with the snapshot (a safety snapshot of the current state is taken first, so this is undoable). "
           f"To undo a single curator mutation instead, use `{_cmd('rollback <ledger-entry-id>')}`. "
-          "Cron jobs that still exist will have their skills/skill fields restored from the snapshot; "
-          "all other cron fields are left alone.")
+          "Telemetry, the ledger and the archive live outside the tree and are not affected.")
     if not getattr(args, "yes", False) and not _confirm("Proceed? [y/N] "):
         return 1
     ok, msg, _ = curator_backup.rollback(backup_id=target_path.name)
@@ -554,7 +547,7 @@ _SUBCOMMANDS = (
      _arg("skill", nargs="+", help="Skill name(s) to release")),
     ("restore", "Restore an archived skill", _cmd_restore, _SKILL),
     ("list-archived", "List archived skills", _cmd_list_archived),
-    ("archive", "Manually archive a skill (move to .archive/)", _cmd_archive, _SKILL),
+    ("archive", "Manually archive a skill (move to the curator's archive)", _cmd_archive, _SKILL),
     ("prune", "Bulk-archive curator-managed skills idle for >= N days (default 90)", _cmd_prune,
      _arg("--days", type=int, default=90, help="Archive skills idle for at least N days (default: 90)"),
      _YES,

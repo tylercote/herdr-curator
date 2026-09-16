@@ -1,40 +1,43 @@
-"""Home + derived paths.
+"""State dir + skills dir + every derived path.
 
 Everything is resolved at CALL time from the environment, never cached at
 import, so a process can be re-pointed (tests, multi-home tooling) with an env
 var alone.
 
-Resolution -- one rule: an explicit ``CURATOR_HOME`` is a self-contained tree;
-otherwise the plugin lives where Herdr puts plugin data and curates Claude
-Code's skills.
-
-    home        CURATOR_HOME > HERDR_PLUGIN_STATE_DIR
+    state       HERDR_PLUGIN_STATE_DIR > CURATOR_HOME
                 > ${XDG_STATE_HOME:-~/.local/state}/herdr/plugins/curator
-    skills dir  CURATOR_SKILLS_DIR > config ``skills.dir``
-                > <home>/skills (explicit CURATOR_HOME only) > ~/.claude/skills
+    skills dir  CURATOR_SKILLS_DIR > config ``skills.dir`` > ~/.claude/skills
     config      see ``curator.config.config_path``
 
 Herdr hands the plugin ``HERDR_PLUGIN_STATE_DIR`` / ``HERDR_PLUGIN_CONFIG_DIR``
 when it spawns a manifest command; the XDG fallbacks reconstruct the same
 directories so a bare ``curator`` in any shell lands on identical paths.
 
-Layout (the split between "inside skills/" and "under home" is deliberate and
-load-bearing for rollback semantics: snapshots exclude ``.curator_backups``,
-and the ledger blob store must survive a tree rollback):
+Layout. The skills tree is the user's (or Claude Code's); the curator writes
+NOTHING into it. Everything it knows about a tree lives under one per-tree
+directory in the state dir, keyed by the tree's resolved path, so a snapshot
+is purely "the skills as they were" and a tree rollback never touches
+telemetry, the ledger or the archive:
 
-    <skills>/.usage.json                 telemetry + provenance sidecar
-    <skills>/.archive/<name>/            archived (recoverable) skills, flat
-    <skills>/.curator_state              scheduler state
-    <skills>/.curator_backups/<id>/      whole-tree tar.gz snapshots
-    <skills>/.curator_ledger.jsonl       per-mutation audit ledger
-    <home>/.curator_backups/blobs/       content-addressed ledger blobs
-    <home>/logs/curator/<stamp>/         per-run run.json + REPORT.md
-    <home>/cron/jobs.json                scheduled jobs (skill refs are protected)
+    <skills>/                          skills only (plus the user's own .git)
+    <state>/
+      trees/<key>/                     one per curated tree, e.g. claude-skills-3fa2b1c9
+        usage.json                     telemetry + provenance sidecar (+ usage.json.lock)
+        state.json                     scheduler state
+        ledger.jsonl                   per-mutation audit ledger (index)
+        blobs/<sha256>                 content-addressed ledger blobs
+        archive/<name>/                archived (recoverable) skills, flat
+        snapshots/<utc-iso>/           whole-tree tar.gz + manifest.json
+      logs/curator/<stamp>/            per-run run.json + REPORT.md
+      bin/curator-hook, plugin_root    stable hook launcher
+      daemon.pid, activity.json, hooks.log
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from pathlib import Path
 
 PLUGIN_ID = "curator"  # must match ``id`` in herdr-plugin.toml
@@ -55,11 +58,6 @@ def _xdg(var: str, default_subpath: str) -> Path:
     return expanduser(raw) if raw else Path.home() / default_subpath
 
 
-def explicit_home() -> bool:
-    """True when ``CURATOR_HOME`` is set: the caller wants a self-contained tree."""
-    return bool(os.environ.get("CURATOR_HOME"))
-
-
 def herdr_state_dir() -> Path:
     """Where Herdr keeps this plugin's state (``HERDR_PLUGIN_STATE_DIR``, or its XDG location)."""
     raw = os.environ.get("HERDR_PLUGIN_STATE_DIR")
@@ -72,7 +70,12 @@ def herdr_config_dir() -> Path:
     return Path(raw) if raw else _xdg("XDG_CONFIG_HOME", ".config") / "herdr" / "plugins" / "config" / PLUGIN_ID
 
 
-def get_home() -> Path:
+def state_dir() -> Path:
+    """The one directory the curator owns. Herdr's ``HERDR_PLUGIN_STATE_DIR`` wins when set (every
+    manifest command); ``CURATOR_HOME`` is the override for a bare shell, tests and tooling; else
+    the XDG location, which is where Herdr puts it anyway."""
+    if os.environ.get("HERDR_PLUGIN_STATE_DIR"):
+        return herdr_state_dir()
     raw = os.environ.get("CURATOR_HOME")
     return expanduser(raw) if raw else herdr_state_dir()
 
@@ -85,24 +88,19 @@ def _display(path: Path) -> str:
         return str(path)
 
 
-def display_home() -> str:
-    return _display(get_home())
-
-
 def display_skills_dir() -> str:
     return _display(skills_dir())
 
 
 def expand_path(entry: str) -> Path:
-    """``~`` and ``${VAR}`` expanded; a relative entry is relative to HOME."""
+    """``~`` and ``${VAR}`` expanded; a relative entry is relative to the state dir."""
     p = expanduser(os.path.expandvars(str(entry)))
-    return p if p.is_absolute() else get_home() / p
+    return p if p.is_absolute() else state_dir() / p
 
 
 def default_skills_dir() -> Path:
-    """The tree to curate when nothing points us at one: Claude Code's, unless the
-    caller asked for a self-contained home."""
-    return get_home() / "skills" if explicit_home() else Path.home() / ".claude" / "skills"
+    """The tree to curate when nothing points us at one: Claude Code's."""
+    return Path.home() / ".claude" / "skills"
 
 
 def skills_dir() -> Path:
@@ -119,46 +117,57 @@ def skills_dir() -> Path:
     return default_skills_dir()
 
 
+# --- per-tree directory -----------------------------------------------------------------
+
+_SLUG_RE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def _slug(text: str) -> str:
+    return _SLUG_RE.sub("-", text.lstrip(".")).strip("-") or "tree"
+
+
+def tree_key(skills: Path) -> str:
+    """Stable, readable name for one skills tree: ``<parent>-<name>-<sha1[:8] of the resolved path>``
+    (``~/.claude/skills`` -> ``claude-skills-3fa2b1c9``). Keyed on the *resolved* path so a
+    symlinked tree maps to the same directory whichever way it is addressed."""
+    resolved = os.path.realpath(str(skills))
+    digest = hashlib.sha1(resolved.encode("utf-8")).hexdigest()[:8]
+    p = Path(resolved)
+    return f"{_slug(p.parent.name)}-{_slug(p.name)}-{digest}"
+
+
+def trees_root() -> Path:
+    return state_dir() / "trees"
+
+
+def tree_dir() -> Path:
+    """Everything the curator knows about the current skills tree."""
+    return trees_root() / tree_key(skills_dir())
+
+
 def usage_file() -> Path:
-    return skills_dir() / ".usage.json"
-
-
-def archive_dir() -> Path:
-    return skills_dir() / ".archive"
+    return tree_dir() / "usage.json"
 
 
 def state_file() -> Path:
-    return skills_dir() / ".curator_state"
-
-
-def backups_dir() -> Path:
-    return skills_dir() / ".curator_backups"
+    return tree_dir() / "state.json"
 
 
 def ledger_path() -> Path:
-    return skills_dir() / ".curator_ledger.jsonl"
+    return tree_dir() / "ledger.jsonl"
 
 
 def blobs_dir() -> Path:
-    return get_home() / ".curator_backups" / "blobs"
+    return tree_dir() / "blobs"
+
+
+def archive_dir() -> Path:
+    return tree_dir() / "archive"
+
+
+def backups_dir() -> Path:
+    return tree_dir() / "snapshots"
 
 
 def reports_root() -> Path:
-    return get_home() / "logs" / "curator"
-
-
-def cron_dir() -> Path:
-    return get_home() / "cron"
-
-
-def cron_jobs_file() -> Path:
-    return cron_dir() / "jobs.json"
-
-
-def plugin_state_dir() -> Path:
-    """Daemon pidfile + activity clock. Herdr's explicit ``HERDR_PLUGIN_STATE_DIR`` wins;
-    a self-contained home keeps them in a subdir; otherwise this is Herdr's state dir,
-    which is also home."""
-    if os.environ.get("HERDR_PLUGIN_STATE_DIR"):
-        return herdr_state_dir()
-    return get_home() / ".curator_plugin" if explicit_home() else herdr_state_dir()
+    return state_dir() / "logs" / "curator"

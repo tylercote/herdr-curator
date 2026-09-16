@@ -40,7 +40,7 @@ def test_rows_merge_usage_disabled_archived_and_managed(home, set_config):
     assert set(rows) == {"alpha", "beta", "gone"}
     assert rows["alpha"]["enabled"] is False and rows["alpha"]["category"] == "cat" and rows["alpha"]["managed"] is False
     assert rows["beta"]["enabled"] is True and rows["beta"]["managed"] is True and rows["beta"]["use_count"] == 1
-    assert rows["gone"]["state"] == "archived" and rows["gone"]["path"].parent.name == ".archive"
+    assert rows["gone"]["state"] == "archived" and rows["gone"]["path"].parent.name == "archive"
     assert rows["alpha"]["description"] == "test skill"
 
 

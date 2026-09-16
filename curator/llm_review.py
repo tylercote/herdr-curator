@@ -93,9 +93,9 @@ def build_mcp_config(*, run_dir: Path, dry_run: bool) -> Dict[str, Any]:
         args.append("--dry-run")
     env = {k: v for k, v in ((k, os.environ.get(k)) for k in _PASSTHROUGH_ENV) if v}
     # The parent has already resolved every path; pin them so the child cannot re-derive
-    # them differently (an explicit CURATOR_HOME alone would re-point skills under it).
+    # them differently.
     from curator.config import config_path
-    env.setdefault("CURATOR_HOME", str(paths.get_home()))
+    env.setdefault("CURATOR_HOME", str(paths.state_dir()))
     env.setdefault("CURATOR_SKILLS_DIR", str(paths.skills_dir()))
     env.setdefault("CURATOR_CONFIG", str(config_path()))
     return {"mcpServers": {MCP_SERVER_NAME: {"command": sys.executable, "args": args, "env": env}}}

@@ -9,6 +9,8 @@ from contextvars import copy_context
 
 import pytest
 
+from curator import paths
+
 
 from conftest import write_skill
 
@@ -596,7 +598,7 @@ class TestCuratorConsolidationDeleteGuard:
         _create_curator_skill("umbrella", _skill_content("umbrella"))
         result = json.loads(skill_manage(action="delete", name="narrow", absorbed_into="umbrella"))
         assert result["success"] is True and result["_archived"] is True and "archived" in result["message"]
-        assert (curator_pass / ".archive" / "narrow").exists() and not (curator_pass / "narrow").exists()
+        assert (paths.archive_dir() / "narrow").exists() and not (curator_pass / "narrow").exists()
         assert skill_usage.get_record("narrow")["state"] == "archived"  # record kept, not forgotten
 
     def test_background_review_read_survives_copied_tool_contexts(self, curator_pass):
@@ -689,7 +691,7 @@ def test_background_pass_can_archive_a_managed_duplicate_into_an_external_skill(
     skill_usage.mark_agent_created("polish-lite")
     r = _bg_delete("polish-lite", "polish")
     assert r["success"] is True and r.get("_archived") is True and "absorbed into 'polish'" in r["message"]
-    assert not (home / "skills" / "polish-lite").exists() and (home / "skills" / ".archive" / "polish-lite" / "SKILL.md").exists()
+    assert not (home / "skills" / "polish-lite").exists() and (paths.archive_dir() / "polish-lite" / "SKILL.md").exists()
     assert (real / "SKILL.md").read_text(encoding="utf-8").endswith("Original.\n")
     # and the reverse is refused: the pass may not archive the external skill itself
     r = _bg_delete("polish", "polish-lite")

@@ -1,9 +1,9 @@
 """Per-mutation skill audit ledger + single-edit rollback (port of ``tools/skill_ledger.py``).
 
 Every skill mutation (any actor) appends one JSONL entry to
-``<skills>/.curator_ledger.jsonl`` with before/after file manifests whose
-contents are stored content-addressed (sha256-deduped) under
-``<home>/.curator_backups/blobs/``. TELEMETRY, NOT A GATE: every public write
+``<tree>/ledger.jsonl`` with before/after file manifests whose contents are
+stored content-addressed (sha256-deduped) under ``<tree>/blobs/``. Entries may
+reference files in the skills tree or in the tree's ``archive/``; nothing else. TELEMETRY, NOT A GATE: every public write
 path swallows and logs — except ``rollback_entry``, which FAILS CLOSED when
 its safety capture fails.
 """
@@ -31,7 +31,6 @@ _BACKUP_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(-\d{2})?$")
 _ARCHIVE_TS_SUFFIX_RE = re.compile(r"^(.+)-\d{14}$")
 _PACKAGE_RESTORE_ACTIONS = frozenset({"delete", "archive", "purge"})
 _VALID_ACTORS = {"curator", "agent", "user"}
-_NON_PACKAGE_TOPS = {".curator_backups", ".archive"}
 
 ACTOR_AGENT, ACTOR_CURATOR, ACTOR_USER = "agent", "curator", "user"
 
@@ -90,6 +89,24 @@ def _is_within(root: Path, path: Path) -> bool:
     return _rel_posix(path, root) is not None
 
 
+def _managed_roots() -> Tuple[Path, Path]:
+    """The only places a ledger entry may point: the skills tree and its archive."""
+    return _skills_dir(), paths.archive_dir()
+
+
+def _in_managed_roots(path: Path) -> bool:
+    return any(_is_within(root, path) for root in _managed_roots())
+
+
+def _rel_any(path: Path) -> Optional[str]:
+    """Root-tagged relative key, so a skills-tree file and an archived file never collide."""
+    for tag, root in zip(("skills", "archive"), _managed_roots()):
+        rel = _rel_posix(path, root)
+        if rel is not None:
+            return f"{tag}:{rel}"
+    return None
+
+
 def _store_blob(data: bytes) -> str:
     digest = hashlib.sha256(data).hexdigest()
     dest = blobs_dir() / digest
@@ -122,9 +139,7 @@ def snapshot_paths(root: Optional[Path], *, complete_package: bool = False) -> L
 
 def _package_rel(root: Path) -> Optional[str]:
     posix = (_rel_posix(root, _skills_dir()) or "").strip("/")
-    if not posix or posix.split("/", 1)[0] in _NON_PACKAGE_TOPS:
-        return None
-    return posix
+    return posix or None
 
 
 def _strip_archive_timestamp(name: str) -> str:
@@ -145,7 +160,7 @@ def package_prefixes(root: Optional[Path] = None, skill: Optional[str] = None,
 
 
 def _read_package_files_from_latest_backup(prefixes: List[str]) -> Dict[str, bytes]:
-    backups = _skills_dir() / ".curator_backups"
+    backups = paths.backups_dir()
     try:
         children = list(backups.iterdir()) if prefixes and backups.is_dir() else []
     except OSError:
@@ -189,10 +204,9 @@ def fill_snapshot_from_curator_backup(root: Optional[Path], existing: Optional[L
     if not extra:
         return out
     skills = _skills_dir()
-    home = paths.get_home()
     dest_root = Path(root) if root is not None else None
     pkg_names = {dest_root.name, _strip_archive_timestamp(dest_root.name)} if dest_root else set()
-    have = {rel for rel in (_rel_posix(str(i.get("path", "")), skills) for i in out) if rel is not None}
+    have = {rel for rel in (_rel_any(Path(str(i.get("path", "")))) for i in out) if rel is not None}
     for rel, data in extra.items():
         parts = rel.split("/")
         if dest_root is not None and parts and parts[0] in pkg_names:
@@ -200,9 +214,9 @@ def fill_snapshot_from_curator_backup(root: Optional[Path], existing: Optional[L
         if not parts:
             continue
         dest = (dest_root if dest_root is not None else skills).joinpath(*parts)
-        if not _is_within(skills, dest) or not _is_within(home, dest):
+        if not _in_managed_roots(dest):
             continue
-        rel_key = _rel_posix(dest, skills)
+        rel_key = _rel_any(dest)
         if rel_key is None or rel_key in have:
             continue
         try:
@@ -285,12 +299,11 @@ def get_entry(entry_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _validate_entry_paths(entry: Dict[str, Any]) -> Optional[str]:
-    home = paths.get_home()
     for section in ("before", "after"):
         for item in entry.get(section) or []:
             p = Path(str(item.get("path", "")))
-            if not _is_within(home, p):
-                return f"entry references a path outside {home}: {p}"
+            if not _in_managed_roots(p):
+                return f"entry references a path outside the skills tree and its archive: {p}"
     return None
 
 

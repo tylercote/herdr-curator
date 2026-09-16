@@ -1,11 +1,11 @@
 """Skill usage telemetry + provenance for the Curator (port of ``tools/skill_usage.py``).
 
-A sidecar ``<skills>/.usage.json`` keyed by skill name (never frontmatter —
+A sidecar ``<state>/trees/<key>/usage.json`` keyed by skill name (never frontmatter —
 keeps telemetry out of user-authored SKILL.md).
 Counter bumps are best-effort (DEBUG-logged failures never break a tool call);
 writes are atomic under a cross-process lock. Curator management is an
 explicit ``created_by: agent`` marker — never inferred from location.
-Lifecycle: active -> stale -> archived (moved to ``.archive/``); ``pinned``
+Lifecycle: active -> stale -> archived (moved to the tree's ``archive/``); ``pinned``
 opts out of auto transitions, orthogonal to state.
 
 Record shape::
@@ -64,7 +64,7 @@ def _flock(fd, lock: bool) -> None:
 
 @contextmanager
 def _usage_file_lock():
-    """Serialize .usage.json read-modify-write cycles across processes."""
+    """Serialize usage.json read-modify-write cycles across processes."""
     lock_path = _usage_file().with_suffix(".json.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if fcntl is None and msvcrt is None:
@@ -456,7 +456,7 @@ def _relocate(src: Path, dest: Path, skill_name: str, action: str, **capture_kwa
 
 
 def archive_skill(skill_name: str) -> Tuple[bool, str]:
-    """Move a curator-eligible skill dir to ``.archive/`` (flattened; timestamp suffix on collision)."""
+    """Move a curator-eligible skill dir to the tree's ``archive/`` (flattened; timestamp suffix on collision)."""
     skill_dir = _find_skill_dir(skill_name)
     if skill_dir is None and _find_external_skill_dir(skill_name) is not None:
         return False, _external_read_only_message(skill_name)

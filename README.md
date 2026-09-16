@@ -6,13 +6,12 @@ left alone, the library fills with narrow one-off skills. The curator watches
 what is actually used, retires what is not, and can merge overlapping skills
 into umbrellas — every step reversible.
 
-- **usage telemetry** for every `SKILL.md` (`view` / `use` / `patch` counters in a `.usage.json` sidecar)
+- **usage telemetry** for every `SKILL.md` (`view` / `use` / `patch` counters in a `usage.json` sidecar kept outside the tree)
 - **lifecycle** `active → stale (30d) → archived (90d)` for curator-managed skills, never deleting
 - **pin / adopt / restore / archive / prune** — three ownership classes and only one is ever curated: **managed** (the curator created it, or you ran `curator adopt`), **user** (everything else in the tree — never touched), **external** (registered read-only dirs — telemetry only)
-- **whole-tree tar.gz snapshots** before every real run + `rollback`
+- **whole-tree tar.gz snapshots** before every real run + `rollback` — a snapshot is purely the skills, so restoring one never rewinds telemetry or the ledger
 - **per-mutation audit ledger** (JSONL + content-addressed blobs) with single-entry `rollback <id>`
 - **opt-in LLM consolidation** that forks a headless coding agent whose *only* tools are `skills_list` / `skill_view` / `skill_manage`, then classifies every removal as consolidated-into-umbrella or pruned and writes `run.json` + `REPORT.md`
-- **cron job protection**: skills referenced by `cron/jobs.json` are never auto-archived, and references are rewritten after a consolidation
 
 Stdlib Python ≥ 3.9. No dependencies. `ARCHITECTURE.md` explains how it is built.
 
@@ -65,16 +64,30 @@ its own data where Herdr keeps plugin data:
 |---|---|
 | skills | `CURATOR_SKILLS_DIR` → config `skills.dir` → `~/.claude/skills` |
 | config | `CURATOR_CONFIG` → `$(herdr plugin config-dir curator)/config.json` (`~/.config/herdr/plugins/config/curator/`) |
-| reports, ledger blobs, cron jobs, daemon state | `CURATOR_HOME` → Herdr's plugin state dir (`~/.local/state/herdr/plugins/curator/`) |
+| everything the curator itself writes | Herdr's plugin state dir (`~/.local/state/herdr/plugins/curator/`; `CURATOR_HOME` overrides it outside Herdr) |
+
+**The skills tree stays yours: the curator writes nothing into it.** Telemetry, scheduler
+state, the audit ledger and its blobs, archived skills and whole-tree snapshots all live in one
+per-tree directory under the state dir, named after the tree it belongs to:
+
+```
+~/.local/state/herdr/plugins/curator/
+  trees/claude-skills-3fa2b1c9/     ← one per curated tree (~/.claude/skills here)
+    usage.json  state.json  ledger.jsonl  blobs/  archive/<name>/  snapshots/<utc-iso>/
+  logs/curator/<stamp>/             run.json + REPORT.md
+  bin/curator-hook  plugin_root  daemon.pid  activity.json  hooks.log
+```
+
+So a whole-tree snapshot is purely "the skills as they were", and restoring one never rewinds
+telemetry, the ledger or the archive.
 
 Herdr sets `HERDR_PLUGIN_CONFIG_DIR` / `HERDR_PLUGIN_STATE_DIR` for commands it spawns;
 the fallbacks reconstruct the same directories (honouring `XDG_CONFIG_HOME` /
 `XDG_STATE_HOME`), so `curator` typed in any shell and the scheduled plugin run agree
-on every path. Setting `CURATOR_HOME` explicitly makes that directory a self-contained
-tree instead (`<home>/skills`, `<home>/config.json`).
+on every path.
 
 Hand-written skills are safe: curation is opt-in per skill, not per directory. A skill
-is only touched once `created_by: agent` is on its `.usage.json` record — the curator
+is only touched once `created_by: agent` is on its `usage.json` record — the curator
 writes that for skills it creates, and `curator adopt <name>` is the only way an
 existing one crosses over (`curator unadopt <name>` hands it back, keeping its
 counters). Everything else shows up under `curator status` as
@@ -149,10 +162,28 @@ always exits 0 and logs each recorded event (and its source tool) to `<state>/ho
 
 **Nothing points at the checkout.** Host configs reference one stable launcher,
 `<state>/bin/curator-hook`, which execs whatever plugin root Herdr last installed and exits 0
-silently if the plugin is gone. So `herdr plugin update` never strands a hook, Codex never asks
-you to re-trust an unchanged command, and uninstalling the plugin never spams your harness with
-errors. Still, run `curator hooks uninstall` before `herdr plugin uninstall` to leave the host
-configs clean.
+silently if the plugin is gone. So upgrading never strands a hook, Codex never asks you to
+re-trust an unchanged command, and uninstalling the plugin never spams your harness with
+errors. Host config files are rewritten in place: existing hooks, other keys, file mode and a
+symlink (dotfile managers) are all preserved — only our tagged entries are added or removed.
+
+**Upgrade.** Herdr (0.8.x) has no `plugin update`; run `herdr plugin install tylercote/herdr-curator`
+again (a linked checkout just needs `git pull`). The launcher is refreshed at the next Herdr
+server start. A daemon already running keeps the old code until Herdr restarts.
+
+**Remove**, in this order — Herdr has no plugin teardown hook, so the plugin cannot do this for you:
+
+```sh
+curator hooks uninstall                       # host configs back to how they were, launcher removed
+herdr plugin uninstall curator                # (or `herdr plugin unlink curator` for a linked checkout)
+rm -rf ~/.local/state/herdr/plugins/curator   # optional: telemetry, ledger, snapshots, reports, daemon state
+rm -rf ~/.config/herdr/plugins/config/curator # optional: config.json
+```
+
+Your skills tree needs no cleanup — the curator never wrote into it. Before the `rm -rf`, check
+`curator list-archived`: archived skills live under `trees/<key>/archive/` in that state dir and
+are deleted with it (`curator restore <name>` puts one back first). A daemon still running exits
+when the Herdr server does.
 
 **Skill directories.** pi and Codex read `~/.agents/skills`; OpenCode and Codex have their own
 too. Reconcile adds the ones that exist to `skills.external_dirs` — telemetry only; external
@@ -187,7 +218,7 @@ Off by default (`curator.consolidate: false`). When on, or with `curator run --c
 
 ## Safety
 
-- **Only managed skills are ever modified autonomously.** A skill is managed only when its `.usage.json` record says `created_by: agent`, and exactly two things write that: an agent creating a *new* skill through `curator mcp-serve` (the LLM pass, or an agent you mounted the server in), and you running `curator adopt`. Hooks, ticks and startup never adopt anything.
+- **Only managed skills are ever modified autonomously.** A skill is managed only when its `usage.json` record says `created_by: agent`, and exactly two things write that: an agent creating a *new* skill through `curator mcp-serve` (the LLM pass, or an agent you mounted the server in), and you running `curator adopt`. Hooks, ticks and startup never adopt anything.
 - **It sees everything, touches only its own.** `skills_list` shows the model every skill — yours, external ones, its own — each labelled with its `owner`. That visibility exists so it never duplicates you: if a managed skill (or an umbrella it is about to build) is already covered by a user or external skill, the required move is to archive the managed one *absorbed into* the existing skill, which is recorded as a consolidation and modifies nothing outside the curator's own skills.
 - **`skill_manage` is fenced at the write layer, unconditionally.** Every write goes through an ownership guard that refuses pinned, external and non-managed skills regardless of what the model asks and regardless of the write origin (the origin only labels telemetry: ledger actor, view-vs-use, archive-vs-delete); `skills_list` labels every row with its `owner` so the model is told what it may touch; and the pass's own reads count as *views*, not *uses*, so it can never keep a skill artificially alive.
 - **Rollback comes in two sizes.** `curator rollback <ledger-entry-id>` undoes one curator mutation, file by file. `curator rollback --id <snapshot>` restores the **whole tree** — every skill, including ones the curator never managed, back to the moment of that snapshot (a safety snapshot is taken first, so it is itself undoable). Prefer the ledger form; reach for the snapshot form only when you want the entire tree back.

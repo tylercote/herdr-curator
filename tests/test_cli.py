@@ -469,7 +469,8 @@ def test_purge_paths(home, monkeypatch, capsys, set_config):
     assert "purge disabled" in capsys.readouterr().out
     assert cli._cmd_purge(_ns(days=30, dry_run=False, yes=True)) == 0
     assert "no archive directory" in capsys.readouterr().out
-    archive = home / "skills" / ".archive"
+    from curator import paths
+    archive = paths.archive_dir()
     old = write_skill(archive, "old")
     write_skill(archive, "new")
     ancient = time.time() - 400 * 86400
