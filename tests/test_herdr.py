@@ -375,3 +375,30 @@ def test_daemon_and_startup_do_nothing_lasting_outside_herdr(herdr_env, monkeypa
     monkeypatch.setattr(h, "tick", lambda **kw: ticks.append(kw))
     monkeypatch.setattr(h.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("slept: daemon did not exit")))
     assert h.daemon(interval=1) == 0 and len(ticks) == 1
+
+
+def test_daemon_reexecs_itself_after_a_plugin_reinstall(herdr_env, monkeypatch, tmp_path):
+    """A reinstall rewrites <state>/plugin_root; the live daemon must pick up the new checkout
+    rather than run stale code until Herdr restarts. Same pid, so the pidfile is kept."""
+    from curator import integrations
+    h = herdr_env["herdr"]
+    integrations.write_launcher()
+    assert h._upgraded_plugin_root() is None  # recorded root == our root: nothing to do
+    new_root = tmp_path / "plugins" / "curator-v2"
+    (new_root / "bin").mkdir(parents=True)
+    (new_root / "bin" / "curator").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    integrations.plugin_root_file().write_text(str(new_root) + "\n", encoding="utf-8")
+    assert h._upgraded_plugin_root() == new_root
+    execs = []
+
+    def _execv(exe, argv):
+        execs.append((exe, argv))
+        raise KeyboardInterrupt  # stand in for "this process is gone"
+    monkeypatch.setattr(h.os, "execv", _execv)
+    monkeypatch.setattr(h, "tick", lambda **kw: None)
+    monkeypatch.setattr(h.time, "sleep", lambda s: None)
+    assert h.daemon(interval=7) == 0
+    assert execs == [(sys.executable, [sys.executable, str(new_root / "bin" / "curator"), "daemon", "--interval", "7", "--first-idle", "0"])]
+    # a recorded root with no bin/curator (half-installed) is ignored
+    (new_root / "bin" / "curator").unlink()
+    assert h._upgraded_plugin_root() is None

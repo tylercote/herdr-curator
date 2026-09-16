@@ -216,11 +216,33 @@ def _socket_present() -> bool:
     return inside_herdr() if not sock else Path(sock).exists()
 
 
+def _upgraded_plugin_root() -> Optional[Path]:
+    """The plugin root Herdr last installed, when it differs from the one this process runs from.
+    ``write_launcher`` records it at build/startup; a reinstall changes it under a live daemon."""
+    from curator import integrations
+    try:
+        recorded = Path(integrations.plugin_root_file().read_text(encoding="utf-8").strip())
+    except OSError:
+        return None
+    if not recorded.is_absolute() or recorded.resolve() == integrations.plugin_root().resolve():
+        return None
+    return recorded if (recorded / "bin" / "curator").is_file() else None
+
+
+def _reexec_from(root: Path, interval: float) -> None:
+    """Replace this process with the same daemon from *root*. Same pid, so the pidfile stays valid;
+    ``first_idle`` 0 so the restarted loop measures idleness before it ever runs a pass."""
+    os.execv(sys.executable, [sys.executable, str(root / "bin" / "curator"), "daemon",
+                              "--interval", str(interval), "--first-idle", "0"])
+
+
 def daemon(interval: float = 60.0, first_idle: float = float("inf")) -> int:
     """The 60 s curator tick as a detached, single-instance loop. The first tick observes
     ``first_idle`` (∞ from ``startup``: a session start is fully idle), later ticks measure idle
     via Herdr. Every pass runs synchronously inside the loop, so a pass cannot be cut short by
-    the process exiting; blocking the loop during a pass is fine as it has nothing else to do."""
+    the process exiting; blocking the loop during a pass is fine as it has nothing else to do.
+    After a plugin reinstall the loop re-execs itself from the new checkout, so a long-lived
+    Herdr server never keeps running stale curator code."""
     pidfile = paths.state_dir() / "daemon.pid"
     try:
         pidfile.parent.mkdir(parents=True, exist_ok=True)
@@ -241,6 +263,12 @@ def daemon(interval: float = 60.0, first_idle: float = float("inf")) -> int:
             if not _socket_present():
                 break
             time.sleep(interval)
+            new_root = _upgraded_plugin_root()
+            if new_root is not None:
+                try:
+                    _reexec_from(new_root, interval)
+                except OSError as e:
+                    print(f"curator: could not restart daemon from {new_root}: {e}", file=sys.stderr)
     except KeyboardInterrupt:
         pass
     finally:
